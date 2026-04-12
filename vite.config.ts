@@ -31,6 +31,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,glb,gltf}'],
+        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,  // 8 MB — Babylon.js bundle is ~5 MB
       },
     }),
   ],
