@@ -13,6 +13,7 @@ import type { AudioManager } from '../audio/AudioManager'
 
 const JUMP_HEIGHT        = 3.2
 const JUMP_DURATION      = 0.55
+const GRAVITY            = (2 * JUMP_HEIGHT) / (JUMP_DURATION * JUMP_DURATION)
 const LANE_SWITCH_SPEED  = 0.18   // seconds to cross a lane
 const BUMP_DURATION_MS   = 380
 const INVINCIBILITY_TIME = 1.6
@@ -26,8 +27,13 @@ export class Player {
   private targetLane = 1
   private laneX: number
 
-  private posY   = 0
-  private velY   = 0
+  // posY is absolute height of the player's feet above global ground (y=0).
+  // groundY is the current surface height under the player (0 on road,
+  // higher when on a ramp or the rooftop of a vehicle). ObstacleManager
+  // updates groundY each frame before calling update().
+  private posY     = 0
+  private velY     = 0
+  private groundY  = 0
 
   private invincible      = false
   private invincibleTimer = 0
@@ -68,7 +74,9 @@ export class Player {
   }
 
   jump(): void {
-    if (this.state !== 'running') return
+    // Allow jumping whenever feet are resting on a surface (road or rooftop).
+    // Being 'running' on a rooftop still counts; disallow mid-air or while bumping.
+    if (this.state === 'bumping' || this.state === 'jumping') return
     this.state = 'jumping'
     this.velY  = (2 * JUMP_HEIGHT) / JUMP_DURATION
     this.audio?.playJump()
@@ -102,6 +110,19 @@ export class Player {
     this.audio?.playCoin()
   }
 
+  // ─── Ground surface control (set by ObstacleManager each frame) ───────────
+
+  /**
+   * Set the height of the surface directly underneath the player (0 = road,
+   * >0 = on a ramp or vehicle rooftop). Called every frame *before* update().
+   */
+  setGroundY(y: number): void {
+    this.groundY = y
+  }
+
+  /** Absolute height of the player's feet in world space. */
+  get feetY(): number { return this.posY }
+
   // ─── Update loop ───────────────────────────────────────────────────────────
 
   update(dt: number, runSpeed: number): void {
@@ -123,21 +144,27 @@ export class Player {
       this.laneX = targetX
     }
 
-    // Jump physics
-    if (this.state === 'jumping') {
-      const g  = (2 * JUMP_HEIGHT) / (JUMP_DURATION * JUMP_DURATION)
-      this.velY -= g * dt
+    // Vertical physics — unified so ramps/rooftops work the same as the road:
+    //  - If feet are above the current surface (or moving down), apply gravity.
+    //  - If falling through the surface, snap down and land.
+    //  - If at/below the surface while grounded (state === running), stick to it
+    //    so ramps visibly lift the player.
+    const airborne = this.state === 'jumping' || this.posY > this.groundY + 0.02
+    if (airborne) {
+      this.velY -= GRAVITY * dt
       this.posY += this.velY * dt
-      if (this.posY <= 0) {
-        this.posY  = 0
-        this.velY  = 0
-        this.state = 'running'
+      if (this.posY <= this.groundY && this.velY <= 0) {
+        this.posY = this.groundY
+        this.velY = 0
+        if (this.state === 'jumping') this.state = 'running'
       }
     } else {
-      this.posY = 0
+      // Grounded — follow the surface (slopes, step-ons, step-offs).
+      this.posY = this.groundY
+      this.velY = 0
     }
 
-    // Root position (y=0.75 keeps box centre at mid-height above ground)
+    // Root position (y=0.75 keeps box centre at mid-height above the feet)
     this.mesh.position.x  = this.laneX
     this.mesh.position.y  = 0.75 + this.posY
     this.mesh.position.z += runSpeed * dt

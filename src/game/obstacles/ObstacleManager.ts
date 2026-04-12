@@ -16,7 +16,33 @@ const PLAYER_HALF    = 0.38   // half player body size added to each collision s
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Obstacle { mesh: Mesh; collW: number; collD: number }
+/**
+ * Runnable surface bounds in world space — populated for ramped vehicles so
+ * the player can run up a ramp, across the rooftop, and fall off the far end.
+ *
+ *     topY  ┌────────────┐
+ *           │  rooftop   │
+ *          /└────────────┘
+ *         / ramp
+ *  0 ────/              (player approaches from -z, enters at rampStartZ)
+ *        ^              ^              ^
+ *        rampStartZ     rampEndZ       topEndZ
+ */
+interface Surface {
+  rampStartZ: number
+  rampEndZ:   number
+  topEndZ:    number
+  xMin:       number
+  xMax:       number
+  topY:       number
+}
+
+interface Obstacle {
+  mesh:     Mesh
+  collW:    number
+  collD:    number
+  surface?: Surface
+}
 interface Coin     { mesh: Mesh; collected: boolean; bobOffset: number }
 
 // ─── Material cache ───────────────────────────────────────────────────────────
@@ -30,6 +56,8 @@ let rimMat:      PBRMaterial
 let glassMat:    PBRMaterial
 let coinMat:     PBRMaterial
 let coinGlowMat: StandardMaterial
+let rampYellow:  PBRMaterial
+let rampStripe:  PBRMaterial
 
 // ── Per-spawn random color palettes ──────────────────────────────────────────
 
@@ -68,6 +96,10 @@ function initMats(scene: Scene): void {
   coinGlowMat                 = new StandardMaterial('coinGlow', scene)
   coinGlowMat.emissiveColor   = new Color3(0.8, 0.65, 0.0)
   coinGlowMat.disableLighting = true
+
+  // Bright hazard-yellow ramp with black diagonal stripes — very legible to kids.
+  rampYellow = _pbr(scene, new Color3(0.99, 0.80, 0.04), 0.10, 0.55)
+  rampStripe = _pbr(scene, new Color3(0.07, 0.07, 0.08), 0.10, 0.85)
 }
 
 function _pbr(scene: Scene, color: Color3, metallic = 0, roughness = 0.72): PBRMaterial {
@@ -102,6 +134,11 @@ export class ObstacleManager {
   private nextCoinZ     = 18
   public  score         = 0
   private time          = 0
+  // Remember the vehicle the player was most recently standing on — collision
+  // stays suppressed for a short grace period afterwards so falling off the
+  // front of the rooftop doesn't immediately bump into the cab below.
+  private lastOnObstacle: Obstacle | null = null
+  private onGraceTimer   = 0
 
   constructor(scene: Scene) {
     this.scene = scene
@@ -110,25 +147,40 @@ export class ObstacleManager {
 
   // ─── Spawning ──────────────────────────────────────────────────────────────
 
-  private _spawnObstacle(z: number): void {
+  // Returns the z-length taken up by the spawned obstacle (ramps need extra
+  // breathing room so the player can line up with them), so the caller can
+  // advance nextObstacleZ by a suitable amount.
+  private _spawnObstacle(z: number): number {
     const roll = Math.random()
     let obs: Obstacle
+    let extraGap = 0
 
     if (roll < 0.42) {
       // Single-lane car
       const lane = Math.floor(Math.random() * 3)
       obs = this._makeCar(z, LANE_POSITIONS[lane])
     } else if (roll < 0.74) {
-      // Single-lane delivery truck
-      const lane = Math.floor(Math.random() * 3)
-      obs = this._makeTruck(z, LANE_POSITIONS[lane])
+      // Delivery truck — ~40% chance it has a rear ramp the player can run up.
+      const lane    = Math.floor(Math.random() * 3)
+      const ramped  = Math.random() < 0.40
+      obs = this._makeTruck(z, LANE_POSITIONS[lane], ramped)
+      if (ramped) {
+        this._spawnRooftopCoins(obs.surface!)
+        extraGap = 6      // extra spacing so ramp doesn't jam into prior obstacle
+      }
     } else {
-      // Bus spanning two lanes — center sits between lane 0-1 or lane 1-2
-      const busX = Math.random() > 0.5 ? 1.25 : -1.25
-      obs = this._makeBus(z, busX)
+      // Bus spanning two lanes — ~40% chance it has a rear ramp.
+      const busX    = Math.random() > 0.5 ? 1.25 : -1.25
+      const ramped  = Math.random() < 0.40
+      obs = this._makeBus(z, busX, ramped)
+      if (ramped) {
+        this._spawnRooftopCoins(obs.surface!)
+        extraGap = 6
+      }
     }
 
     this.obstacles.push(obs)
+    return extraGap
   }
 
   // ─── Car (sedan) ──────────────────────────────────────────────────────────
@@ -220,7 +272,7 @@ export class ObstacleManager {
   //  │cb││  cargo box  │
   //  ○  ○○             ○
   //
-  private _makeTruck(z: number, x: number): Obstacle {
+  private _makeTruck(z: number, x: number, ramped = false): Obstacle {
     const root    = new Mesh('truck', this.scene)
     root.position = new Vector3(x, 0, z)
 
@@ -332,7 +384,29 @@ export class ObstacleManager {
       this._addWheel(root, new Vector3(wx, wR, -1.55), wR, wW)
     }
 
-    return { mesh: root as unknown as Mesh, collW: 0.94, collD: 2.00 }
+    // ── Optional rear ramp (player runs up it onto the cargo-box roof) ──
+    // Cargo box: center z=-0.95, depth 2.90, height 1.90 → top at y=2.21,
+    // back at z=-2.40. Ramp rises from ground at z=-2.40 down to rear.
+    let surface: Surface | undefined
+    if (ramped) {
+      const topY        = 2.21
+      const rampLength  = 3.6
+      const rampLocalZ  = -2.40           // where rooftop meets ramp (local z)
+      const rampBackLZ  = rampLocalZ - rampLength
+      const topFrontLZ  = 0.50            // front end of cargo roof (local z)
+      const widthX      = 2.20
+      this._addRamp(root, 0, rampLocalZ, rampLength, topY, widthX)
+      surface = {
+        rampStartZ: z + rampBackLZ,
+        rampEndZ:   z + rampLocalZ,
+        topEndZ:    z + topFrontLZ,
+        xMin:       x - widthX / 2,
+        xMax:       x + widthX / 2,
+        topY,
+      }
+    }
+
+    return { mesh: root as unknown as Mesh, collW: 0.94, collD: 2.00, surface }
   }
 
   // ─── School bus (spans 2 lanes) ───────────────────────────────────────────
@@ -343,7 +417,7 @@ export class ObstacleManager {
   //  └─────────────────────────────┘
   //     lane 0 blocked  lane 1 blocked   lane 2 free (or vice versa)
   //
-  private _makeBus(z: number, x: number): Obstacle {
+  private _makeBus(z: number, x: number, ramped = false): Obstacle {
     const root    = new Mesh('bus', this.scene)
     root.position = new Vector3(x, 0, z)
 
@@ -460,7 +534,98 @@ export class ObstacleManager {
       this._addWheel(root, new Vector3(wx, wR, wz), wR, wW)
     }
 
-    return { mesh: root as unknown as Mesh, collW: 1.55, collD: 1.60 }
+    // ── Optional rear ramp (player runs up it onto the bus roof) ──
+    // Body: center y=1.25, height 1.80; roof at y=2.17 + 0.07 half → top y=2.24.
+    // Rear of body at z=-1.95 (body depth 3.90 → half 1.95).
+    let surface: Surface | undefined
+    if (ramped) {
+      const topY        = 2.24
+      const rampLength  = 3.8
+      const rampLocalZ  = -1.95
+      const rampBackLZ  = rampLocalZ - rampLength
+      const topFrontLZ  = 1.90            // front end of bus roof (local z)
+      const widthX      = 3.40
+      this._addRamp(root, 0, rampLocalZ, rampLength, topY, widthX)
+      surface = {
+        rampStartZ: z + rampBackLZ,
+        rampEndZ:   z + rampLocalZ,
+        topEndZ:    z + topFrontLZ,
+        xMin:       x - widthX / 2,
+        xMax:       x + widthX / 2,
+        topY,
+      }
+    }
+
+    return { mesh: root as unknown as Mesh, collW: 1.55, collD: 1.60, surface }
+  }
+
+  // ─── Ramp builder ─────────────────────────────────────────────────────────
+  //
+  // Builds a sloped yellow ramp attached to `parent`. Dimensions are in the
+  // parent's local frame. The ramp's high end sits at (x, topY, topZ) and
+  // slopes down to (x, 0, topZ - length) along +y / -z.
+  //
+  // Visually: a thin rotated box tinted hazard yellow plus black diagonal
+  // stripes along the top surface. Kid-friendly and unmistakably "run up me".
+  //
+  private _addRamp(
+    parent: Mesh,
+    x: number,
+    topZ: number,
+    length: number,
+    topY: number,
+    widthX: number,
+  ): void {
+    const slopeLen = Math.sqrt(length * length + topY * topY)
+    const angle    = Math.atan2(topY, length)  // pitch around X
+
+    // Solid sloped slab
+    const ramp = MeshBuilder.CreateBox('ramp', {
+      width: widthX, height: 0.18, depth: slopeLen,
+    }, this.scene)
+    ramp.rotation.x = -angle   // tilt so +z end rises
+    ramp.position   = new Vector3(
+      x,
+      topY / 2,
+      topZ - length / 2,
+    )
+    ramp.material       = rampYellow
+    ramp.receiveShadows = true
+    ramp.parent         = parent
+
+    // Black hazard stripes across the top surface (sit just above the slab)
+    const stripeCount = 4
+    for (let i = 0; i < stripeCount; i++) {
+      const t = (i + 0.5) / stripeCount   // 0.125, 0.375, 0.625, 0.875
+      const stripe = MeshBuilder.CreateBox('rampStripe', {
+        width: widthX * 0.92, height: 0.04, depth: slopeLen * 0.11,
+      }, this.scene)
+      stripe.rotation.x = -angle
+      // Position along the slope: offset from center along the tilted axis
+      const s = (t - 0.5) * slopeLen                // signed distance along slope
+      stripe.position = new Vector3(
+        x,
+        topY / 2 + Math.sin(angle) * s + Math.cos(angle) * 0.10,
+        topZ - length / 2 + Math.cos(angle) * s + Math.sin(angle) * 0.10 * -1,
+      )
+      stripe.material = rampStripe
+      stripe.parent   = parent
+    }
+
+    // Short side rails so the ramp reads as a 3D object and not a flat decal
+    for (const sx of [-1, 1]) {
+      const rail = MeshBuilder.CreateBox('rampRail', {
+        width: 0.12, height: 0.22, depth: slopeLen,
+      }, this.scene)
+      rail.rotation.x = -angle
+      rail.position   = new Vector3(
+        x + sx * (widthX / 2 + 0.02),
+        topY / 2 + Math.cos(angle) * 0.10,
+        topZ - length / 2 + Math.sin(angle) * -0.10,
+      )
+      rail.material = rampStripe
+      rail.parent   = parent
+    }
   }
 
   // ─── Wheel builder ─────────────────────────────────────────────────────────
@@ -499,6 +664,59 @@ export class ObstacleManager {
     }
   }
 
+  // Spawns a trail of coins up the ramp and across the rooftop — the big
+  // reward for a kid who nails the ramp jump.
+  private _spawnRooftopCoins(s: Surface): void {
+    const centerX = (s.xMin + s.xMax) / 2
+    const step    = 1.3
+
+    // Ramp: coins hover ~0.6 above the ramp surface (linear rise from 0 to topY)
+    for (let z = s.rampStartZ + 0.6; z < s.rampEndZ; z += step) {
+      const t = (z - s.rampStartZ) / (s.rampEndZ - s.rampStartZ)
+      const y = 0.6 + t * s.topY
+      const mesh = MeshBuilder.CreateCylinder('coin', { diameter: 0.48, height: 0.10, tessellation: 16 }, this.scene)
+      mesh.rotation.x = Math.PI / 2
+      mesh.position   = new Vector3(centerX, y, z)
+      mesh.material   = coinMat
+      this.coins.push({ mesh, collected: false, bobOffset: z * 0.3 })
+    }
+
+    // Rooftop: coins at topY + 0.6
+    for (let z = s.rampEndZ + 0.4; z < s.topEndZ; z += step) {
+      const mesh = MeshBuilder.CreateCylinder('coin', { diameter: 0.48, height: 0.10, tessellation: 16 }, this.scene)
+      mesh.rotation.x = Math.PI / 2
+      mesh.position   = new Vector3(centerX, s.topY + 0.6, z)
+      mesh.material   = coinMat
+      this.coins.push({ mesh, collected: false, bobOffset: z * 0.3 })
+    }
+  }
+
+  // Given the player's (x, z), returns the highest runnable surface height
+  // under them and the obstacle that owns it (so collision can be skipped
+  // while they're on top of it). Returns { groundY: 0 } if on the road.
+  private _groundUnderPlayer(px: number, pz: number): { groundY: number; onObstacle: Obstacle | null } {
+    let best = 0
+    let owner: Obstacle | null = null
+    for (const obs of this.obstacles) {
+      const s = obs.surface
+      if (!s) continue
+      if (px < s.xMin || px > s.xMax) continue
+      let h = 0
+      if (pz >= s.rampStartZ && pz <= s.rampEndZ) {
+        // On the ramp — linear ramp-up
+        const t = (pz - s.rampStartZ) / (s.rampEndZ - s.rampStartZ)
+        h = t * s.topY
+      } else if (pz > s.rampEndZ && pz <= s.topEndZ) {
+        // On the flat rooftop
+        h = s.topY
+      } else {
+        continue
+      }
+      if (h > best) { best = h; owner = obs }
+    }
+    return { groundY: best, onObstacle: owner }
+  }
+
   // ─── Update ────────────────────────────────────────────────────────────────
 
   update(player: Player, playerZ: number, dt: number, onShake: () => void): void {
@@ -506,8 +724,8 @@ export class ObstacleManager {
 
     // Spawn ahead
     while (this.nextObstacleZ < playerZ + SPAWN_AHEAD) {
-      this._spawnObstacle(this.nextObstacleZ)
-      this.nextObstacleZ += 12 + Math.random() * 10
+      const extraGap = this._spawnObstacle(this.nextObstacleZ)
+      this.nextObstacleZ += 12 + Math.random() * 10 + extraGap
     }
     while (this.nextCoinZ < playerZ + SPAWN_AHEAD) {
       this._spawnCoinRow(this.nextCoinZ)
@@ -515,6 +733,20 @@ export class ObstacleManager {
     }
 
     const pp = player.position
+
+    // ── Determine ground height under player (road vs ramp vs rooftop) ──
+    // Compute *before* obstacle collision so we can skip collisions with any
+    // vehicle the player is currently standing on.
+    const { groundY, onObstacle } = this._groundUnderPlayer(pp.x, pp.z)
+    player.setGroundY(groundY)
+
+    if (onObstacle) {
+      this.lastOnObstacle = onObstacle
+      this.onGraceTimer   = 0.6
+    } else if (this.onGraceTimer > 0) {
+      this.onGraceTimer -= dt
+      if (this.onGraceTimer <= 0) this.lastOnObstacle = null
+    }
 
     // Obstacle collision + despawn
     for (let i = this.obstacles.length - 1; i >= 0; i--) {
@@ -526,6 +758,13 @@ export class ObstacleManager {
         continue
       }
       if (!player.isInvincible) {
+        // Skip collision with the vehicle the player is currently running on
+        // top of (or was on in the last 0.6s), OR any vehicle whose rooftop
+        // the player is clearly above.
+        if (obs === onObstacle) continue
+        if (obs === this.lastOnObstacle) continue
+        if (obs.surface && player.feetY >= obs.surface.topY - 0.15) continue
+
         const dx = Math.abs(pp.x - op.x)
         const dz = Math.abs(pp.z - op.z)
         if (dx < obs.collW + PLAYER_HALF && dz < obs.collD + PLAYER_HALF) {
@@ -565,5 +804,7 @@ export class ObstacleManager {
     this.nextObstacleZ  = 35
     this.nextCoinZ      = 18
     this.score          = 0
+    this.lastOnObstacle = null
+    this.onGraceTimer   = 0
   }
 }
