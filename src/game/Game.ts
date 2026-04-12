@@ -11,9 +11,9 @@ import { SpeedLines }          from './fx/SpeedLines'
 import { ZoneManager }         from './zones/ZoneManager'
 import { CelebrationManager }  from './ui/CelebrationManager'
 import { HUD }                 from './ui/HUD'
+import { type GameSettings, SPEED_MIN, SPEED_MAX } from './ui/Settings'
 
 const BASE_SPEED = 11
-const MAX_SPEED  = 28
 const ACCEL      = 0.42
 
 export class Game {
@@ -33,11 +33,13 @@ export class Game {
   private paused        = false
   private totalDistance = 0
 
+  // Live settings (updated immediately when changed in UI)
+  private settings: GameSettings
+
   constructor(canvas: HTMLCanvasElement) {
     this.engine    = new GameEngine(canvas)
     const scene    = this.engine.scene
 
-    // Environment — returns sky + ground materials for ZoneManager
     const envAssets = setupEnvironment(scene)
 
     this.player    = new Player(scene)
@@ -47,10 +49,12 @@ export class Game {
     this.audio     = new AudioManager()
     this.hud       = new HUD()
 
+    // Read initial settings from the HUD (which loaded from localStorage)
+    this.settings = this.hud.getSettings()
+
     this.player.setAudio(this.audio)
     new InputHandler(this.player, canvas)
 
-    // ZoneManager — drives sky, fog, lighting, materials, audio per zone
     this.zones = new ZoneManager(
       scene,
       envAssets.skyMat,
@@ -60,13 +64,15 @@ export class Game {
     this.zones.setGrassMat(this.track.grassMat)
     this.zones.setRoadMat(this.track.roadMat)
     this.zones.setFarGround(envAssets.farGround)
+    // Apply initial bright-mode setting
+    this.zones.setBrightMode(this.settings.brightZones)
+
     this.zones.onZoneEntered = (zone) => {
       this.audio.setZone(zone.id)
       this.audio.playCelebration()
       this.celebrations?.celebrateZone(zone)
     }
 
-    // Post-processing + speed lines + celebration particles need active camera
     scene.onAfterRenderObservable.addOnce(() => {
       if (scene.activeCamera) {
         const pipeline = setupPostProcessing(scene, scene.activeCamera)
@@ -79,8 +85,14 @@ export class Game {
     this.hud.onPlay   = () => this._startRun()
     this.hud.onPause  = () => this._pause()
     this.hud.onResume = () => this._resume()
-    this.hud.showStart()
 
+    this.hud.onSettingsChange = (s: GameSettings) => {
+      this.settings = s
+      this.zones?.setBrightMode(s.brightZones)
+      // Speed change takes effect next tick automatically
+    }
+
+    this.hud.showStart()
     this.engine.start(() => this._tick())
   }
 
@@ -89,7 +101,9 @@ export class Game {
     this.audio.startMusic()
     this.running       = true
     this.paused        = false
-    this.runSpeed      = BASE_SPEED
+    this.runSpeed      = this.settings.speedMode === 'manual'
+      ? this.settings.manualSpeed
+      : BASE_SPEED
     this.totalDistance = 0
     this.obstacles.reset()
     this.hud.hideStart()
@@ -113,7 +127,13 @@ export class Game {
     const dt = Math.min(this.engine.deltaTime, 0.05)
     if (!this.running || this.paused) return
 
-    this.runSpeed      = Math.min(MAX_SPEED, this.runSpeed + ACCEL * dt)
+    // Speed: auto-increase or hold manual constant
+    if (this.settings.speedMode === 'auto') {
+      this.runSpeed = Math.min(SPEED_MAX, this.runSpeed + ACCEL * dt)
+    } else {
+      this.runSpeed = this.settings.manualSpeed
+    }
+
     this.totalDistance += this.runSpeed * dt
 
     this.player.update(dt, this.runSpeed)
@@ -128,10 +148,10 @@ export class Game {
     this.engine.updateLampLights(this.player.position.z)
 
     this.zones?.update(this.totalDistance, dt)
-    this.speedLines?.setSpeed(this.runSpeed, MAX_SPEED)
+    this.speedLines?.setSpeed(this.runSpeed, SPEED_MAX)
     this.celebrations?.checkMilestone(this.totalDistance)
 
-    const speedFrac = (this.runSpeed - BASE_SPEED) / (MAX_SPEED - BASE_SPEED)
-    this.hud.update(this.totalDistance, this.obstacles.score / 10, speedFrac)
+    const speedFrac = (this.runSpeed - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)
+    this.hud.update(this.totalDistance, this.obstacles.score / 10, Math.max(0, Math.min(1, speedFrac)))
   }
 }
