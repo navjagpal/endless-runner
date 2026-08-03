@@ -1,12 +1,12 @@
 import {
   Scene,
   ParticleSystem,
-  Texture,
   Color4,
   Vector3,
   Mesh,
 } from '@babylonjs/core'
 import type { ZoneConfig } from '../zones/ZoneManager'
+import { getFlareTexture } from '../fx/Textures'
 
 // ─── Milestone list ────────────────────────────────────────────────────────────
 
@@ -197,7 +197,7 @@ export class CelebrationManager {
 
     for (const [r, g, b] of CONFETTI_COLORS) {
       const ps = new ParticleSystem(`confetti_${r}`, 35, this.scene)
-      ps.particleTexture = new Texture('https://assets.babylonjs.com/particles/flare.png', this.scene)
+      ps.particleTexture = getFlareTexture(this.scene)
       ps.emitter        = this.emitter
       ps.minEmitBox     = new Vector3(-1.5, 0, -1)
       ps.maxEmitBox     = new Vector3( 1.5, 0,  1)

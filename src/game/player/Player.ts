@@ -4,58 +4,152 @@ import {
   MeshBuilder,
   Vector3,
   ParticleSystem,
-  Texture,
+  Color3,
   Color4,
+  StandardMaterial,
+  TransformNode,
 } from '@babylonjs/core'
 import { LANE_POSITIONS } from '../track/TrackChunk'
-import { CharacterMesh, type CharacterState } from './CharacterMesh'
+import { CharacterMesh } from './CharacterMesh'
+import { CharacterRig } from './CharacterRig'
+import type { Character, CharacterState } from './Character'
 import type { AudioManager } from '../audio/AudioManager'
+import type { GameEngine } from '../core/GameEngine'
+import { getFlareTexture, getBlobShadowTexture } from '../fx/Textures'
+import { getQualityProfile } from '../core/DeviceTier'
 
 const JUMP_HEIGHT        = 3.2
-const JUMP_DURATION      = 0.55
-const LANE_SWITCH_SPEED  = 0.18   // seconds to cross a lane
-const BUMP_DURATION_MS   = 380
+const JUMP_RISE_TIME     = 0.42
+// Falling faster than rising is the oldest trick in platformer feel:
+// it keeps the airtime readable while making the landing feel decisive.
+const FALL_MULTIPLIER    = 1.55
+const SLIDE_DURATION     = 0.55
+const BUMP_DURATION      = 0.38
 const INVINCIBILITY_TIME = 1.6
 
-export class Player {
-  public mesh: Mesh                // invisible root — used for position/collision
+// How long before landing a jump input is still honoured. Without this,
+// a player who taps a few frames early gets nothing and reads it as the
+// game dropping their input — the single most common complaint about
+// touch runners.
+const INPUT_BUFFER_TIME  = 0.18
 
-  private charMesh: CharacterMesh
+const LANE_SWITCH_TIME   = 0.16
+
+// Collision body height standing vs. sliding. The slide has to duck
+// under a 1.35-unit gantry, and the stand has to be tall enough that
+// clearing a car actually requires the jump.
+const STAND_HEIGHT       = 1.50
+const SLIDE_HEIGHT       = 0.70
+
+export class Player {
+  public mesh: Mesh                // invisible root — position + collision
+
+  private scene: Scene
+  private engine: GameEngine
+  private character: Character
+  private charAnchor: TransformNode
 
   private state: CharacterState = 'running'
   private targetLane = 1
   private laneX: number
+  private lateralVel = 0
 
-  private posY   = 0
-  private velY   = 0
+  private posY = 0
+  private velY = 0
+
+  private slideTimer  = 0
+  private bumpTimer   = 0
+  private bufferedJump = 0
 
   private invincible      = false
   private invincibleTimer = 0
   private audio: AudioManager | null = null
 
+  private blobShadow: Mesh
   private bumpPs: ParticleSystem
   private coinPs: ParticleSystem
 
-  constructor(scene: Scene) {
+  constructor(scene: Scene, engine: GameEngine) {
+    this.scene  = scene
+    this.engine = engine
     this.laneX  = LANE_POSITIONS[1]
 
-    // Invisible collision root (thin box standing on ground)
+    // Invisible collision root. Kept a plain box so collision stays
+    // independent of whatever the character visual happens to be.
     this.mesh = MeshBuilder.CreateBox('playerRoot', { width: 0.75, height: 1.50, depth: 0.75 }, scene)
-    this.mesh.position = new Vector3(this.laneX, 0.75, 0)
-    this.mesh.isVisible   = false
-    this.mesh.isPickable  = false
+    this.mesh.position   = new Vector3(this.laneX, 0.75, 0)
+    this.mesh.isVisible  = false
+    this.mesh.isPickable = false
 
-    // Visible character — positioned so feet sit at y=0 relative to root bottom
-    this.charMesh = new CharacterMesh(scene, this.mesh)
-    this.charMesh.root.position.y = -0.75   // shift so feet land at ground level
+    // Character hangs off an anchor so the slide squash applied to the
+    // collision root doesn't also squash the visual — the two want
+    // different shapes.
+    this.charAnchor = new TransformNode('charAnchor', scene)
+    this.charAnchor.parent = this.mesh
+    this.charAnchor.position.y = -0.75
 
-    this.bumpPs = this._makeBumpParticles(scene)
-    this.coinPs = this._makeCoinParticles(scene)
+    const procedural = new CharacterMesh(scene, this.charAnchor)
+    this.character = procedural
+    this._registerShadowCasters(procedural.castingMeshes)
+
+    // Try to upgrade to a skinned rig in the background. Loading it
+    // synchronously would stall the start screen for no reason — the
+    // procedural character is a perfectly good first frame.
+    void this._tryUpgradeToRig()
+
+    this.blobShadow = this._makeBlobShadow(scene)
+    this.bumpPs     = this._makeBumpParticles(scene)
+    this.coinPs     = this._makeCoinParticles(scene)
+  }
+
+  private async _tryUpgradeToRig(): Promise<void> {
+    const rig = await CharacterRig.tryLoad(this.scene, this.charAnchor)
+    if (!rig) return
+    this.character.dispose()
+    this.character = rig
+    this._registerShadowCasters(rig.castingMeshes)
+  }
+
+  private _registerShadowCasters(meshes: { getTotalVertices(): number }[]): void {
+    if (!this.engine.shadowGenerator) return
+    for (const m of meshes) {
+      this.engine.addShadowCaster(m as Mesh, false)
+    }
+  }
+
+  /**
+   * Soft dark ellipse projected under the player.
+   *
+   * The scene's real shadow map has no casters registered and never had
+   * — so despite a 2048px PCF map being rendered every frame, nothing
+   * has ever cast a shadow in this game. That matters beyond looks:
+   * without a ground contact point, a player mid-jump can't tell where
+   * they'll land relative to an obstacle.
+   */
+  private _makeBlobShadow(scene: Scene): Mesh {
+    const blob = MeshBuilder.CreateGround('blobShadow', { width: 1.1, height: 1.3 }, scene)
+    const tex  = getBlobShadowTexture(scene)
+
+    const mat = new StandardMaterial('blobShadowMat', scene)
+    // The gradient carries the shape in its alpha; the surface itself is
+    // pure black and unlit, so it darkens the road without picking up
+    // zone lighting.
+    mat.diffuseColor    = Color3.Black()
+    mat.specularColor   = Color3.Black()
+    mat.emissiveColor   = Color3.Black()
+    mat.opacityTexture  = tex
+    mat.disableLighting = true
+    mat.backFaceCulling = false
+
+    blob.material   = mat
+    blob.isPickable = false
+    blob.alwaysSelectAsActiveMesh = true
+    return blob
   }
 
   setAudio(audio: AudioManager): void { this.audio = audio }
 
-  // ─── Controls ──────────────────────────────────────────────────────────────
+  // ─── Controls ──────────────────────────────────────────────────────
 
   moveLeft(): void {
     if (this.state === 'bumping') return
@@ -68,101 +162,168 @@ export class Player {
   }
 
   jump(): void {
-    if (this.state !== 'running') return
+    if (this._tryJump()) return
+    // Not jumpable right now — remember the intent briefly instead of
+    // discarding it.
+    this.bufferedJump = INPUT_BUFFER_TIME
+  }
+
+  private _tryJump(): boolean {
+    if (this.state === 'jumping' || this.state === 'bumping') return false
+    if (this.state === 'sliding') this.slideTimer = 0   // slide cancels into a jump
     this.state = 'jumping'
-    this.velY  = (2 * JUMP_HEIGHT) / JUMP_DURATION
+    this.velY  = (2 * JUMP_HEIGHT) / JUMP_RISE_TIME
     this.audio?.playJump()
+    return true
   }
 
   slide(): void {
-    if (this.state !== 'running') return
-    this.state = 'sliding'
-    setTimeout(() => { if (this.state === 'sliding') this.state = 'running' }, 500)
+    if (this.state === 'bumping') return
+    if (this.state === 'jumping') {
+      // Slam down out of a jump rather than ignoring the input.
+      this.velY = Math.min(this.velY, -8)
+      return
+    }
+    this.state      = 'sliding'
+    this.slideTimer = SLIDE_DURATION
   }
 
-  // ─── Called by ObstacleManager ─────────────────────────────────────────────
+  // ─── Called by ObstacleManager ─────────────────────────────────────
 
   handleCollision(): void {
     if (this.invincible) return
-    this.state          = 'bumping'
-    this.invincible     = true
+    this.state           = 'bumping'
+    this.bumpTimer       = BUMP_DURATION
+    this.invincible      = true
     this.invincibleTimer = INVINCIBILITY_TIME
-    this.charMesh.flashRed(true)
+    this.character.flashRed(true)
     this.audio?.playBump()
     this.bumpPs.start()
-    setTimeout(() => {
-      this.charMesh.flashRed(false)
-      if (this.state === 'bumping') this.state = 'running'
-    }, BUMP_DURATION_MS)
   }
 
-  // Called by ObstacleManager when a coin is collected
   triggerCoinEffect(): void {
     this.coinPs.start()
     this.audio?.playCoin()
   }
 
-  // ─── Update loop ───────────────────────────────────────────────────────────
+  // ─── Update loop ───────────────────────────────────────────────────
 
-  update(dt: number, runSpeed: number): void {
-    // Invincibility flicker
+  update(dt: number, runSpeed: number, speedFrac: number): void {
+    this._tickTimers(dt)
+
+    // Consume a buffered jump the instant it becomes legal.
+    if (this.bufferedJump > 0) {
+      this.bufferedJump -= dt
+      if (this._tryJump()) this.bufferedJump = 0
+    }
+
     if (this.invincible) {
       this.invincibleTimer -= dt
-      this.charMesh.setVisible(Math.sin(this.invincibleTimer * 22) > 0)
+      this.character.setVisible(Math.sin(this.invincibleTimer * 22) > 0)
       if (this.invincibleTimer <= 0) {
         this.invincible = false
-        this.charMesh.setVisible(true)
+        this.character.setVisible(true)
       }
     }
 
-    // Lane interpolation
-    const targetX = LANE_POSITIONS[this.targetLane]
-    const lerpT   = Math.min(1, dt / LANE_SWITCH_SPEED)
-    this.laneX   += (targetX - this.laneX) * lerpT
-    if (Math.abs(this.laneX - targetX) < 0.01) {
-      this.laneX = targetX
-    }
+    this._updateLane(dt)
+    this._updateJump(dt)
 
-    // Jump physics
-    if (this.state === 'jumping') {
-      const g  = (2 * JUMP_HEIGHT) / (JUMP_DURATION * JUMP_DURATION)
-      this.velY -= g * dt
-      this.posY += this.velY * dt
-      if (this.posY <= 0) {
-        this.posY  = 0
-        this.velY  = 0
-        this.state = 'running'
-      }
-    } else {
-      this.posY = 0
-    }
-
-    // Root position (y=0.75 keeps box centre at mid-height above ground)
     this.mesh.position.x  = this.laneX
     this.mesh.position.y  = 0.75 + this.posY
     this.mesh.position.z += runSpeed * dt
 
-    // Scale for slide
-    const slideScale = this.state === 'sliding' ? 0.55 : 1.0
-    const curScaleY  = this.mesh.scaling.y
-    this.mesh.scaling.y = curScaleY + (slideScale - curScaleY) * Math.min(1, dt * 14)
+    this._updateBlobShadow()
 
-    // Animate character
-    this.charMesh.update(dt, this.state)
+    this.character.update(dt, this.state, {
+      speed: runSpeed,
+      speedFrac,
+      lateralVel: this.lateralVel,
+      verticalVel: this.velY,
+      height: this.posY,
+    })
+  }
+
+  private _tickTimers(dt: number): void {
+    if (this.slideTimer > 0) {
+      this.slideTimer -= dt
+      if (this.slideTimer <= 0 && this.state === 'sliding') this.state = 'running'
+    }
+    if (this.bumpTimer > 0) {
+      this.bumpTimer -= dt
+      if (this.bumpTimer <= 0) {
+        this.character.flashRed(false)
+        if (this.state === 'bumping') this.state = 'running'
+      }
+    }
+  }
+
+  private _updateLane(dt: number): void {
+    const targetX = LANE_POSITIONS[this.targetLane]
+    const prevX   = this.laneX
+
+    // Critically-damped-ish approach rather than a fixed lerp: fast off
+    // the mark, settling without overshoot.
+    const t = 1 - Math.pow(0.0015, dt / LANE_SWITCH_TIME)
+    this.laneX += (targetX - this.laneX) * t
+    if (Math.abs(this.laneX - targetX) < 0.005) this.laneX = targetX
+
+    this.lateralVel = dt > 0 ? (this.laneX - prevX) / dt : 0
+  }
+
+  private _updateJump(dt: number): void {
+    if (this.state !== 'jumping') {
+      this.posY = 0
+      this.velY = 0
+      return
+    }
+    const g = (2 * JUMP_HEIGHT) / (JUMP_RISE_TIME * JUMP_RISE_TIME)
+    this.velY -= g * (this.velY < 0 ? FALL_MULTIPLIER : 1) * dt
+    this.posY += this.velY * dt
+
+    if (this.posY <= 0) {
+      this.posY  = 0
+      this.velY  = 0
+      this.state = 'running'
+    }
+  }
+
+  /** Shadow stays on the ground and shrinks with altitude. */
+  private _updateBlobShadow(): void {
+    const h = this.posY
+    this.blobShadow.position.set(this.laneX, 0.02, this.mesh.position.z)
+    const k = Math.max(0.45, 1 - h / (JUMP_HEIGHT * 1.6))
+    this.blobShadow.scaling.set(k, 1, k)
+    this.blobShadow.visibility = 0.15 + 0.85 * k
   }
 
   get position(): Vector3 { return this.mesh.position }
   get isInvincible(): boolean { return this.invincible }
+  get isSliding(): boolean { return this.state === 'sliding' }
 
-  // ─── Particle systems ──────────────────────────────────────────────────────
+  /**
+   * Vertical extent of the collision body, in world units above the road.
+   *
+   * Collision used to test x and z only, which meant jumping over and
+   * sliding under an obstacle did nothing — both inputs were purely
+   * cosmetic. These two accessors are what make them mechanical.
+   */
+  get bodyBottom(): number { return this.posY }
+  get bodyTop(): number {
+    return this.posY + (this.state === 'sliding' ? SLIDE_HEIGHT : STAND_HEIGHT)
+  }
+
+  // ─── Particle systems ──────────────────────────────────────────────
 
   private _makeBumpParticles(scene: Scene): ParticleSystem {
-    const ps = new ParticleSystem('bump', 80, scene)
-    ps.particleTexture = new Texture('https://assets.babylonjs.com/particles/flare.png', scene)
+    const scale = getQualityProfile().particleScale
+    const count = Math.ceil(80 * scale)
+    const ps = new ParticleSystem('bump', count, scene)
+    ps.particleTexture = getFlareTexture(scene)
     ps.emitter         = this.mesh
     ps.minSize         = 0.10; ps.maxSize         = 0.45
     ps.minLifeTime     = 0.25; ps.maxLifeTime     = 0.55
-    ps.emitRate        = 0;    ps.manualEmitCount = 80
+    ps.emitRate        = 0;    ps.manualEmitCount = count
     ps.color1          = new Color4(1, 0.5, 0, 1)
     ps.color2          = new Color4(1, 0.2, 0.2, 1)
     ps.colorDead       = new Color4(1, 0, 0, 0)
@@ -174,12 +335,14 @@ export class Player {
   }
 
   private _makeCoinParticles(scene: Scene): ParticleSystem {
-    const ps = new ParticleSystem('coinFx', 30, scene)
-    ps.particleTexture = new Texture('https://assets.babylonjs.com/particles/flare.png', scene)
+    const scale = getQualityProfile().particleScale
+    const count = Math.ceil(30 * scale)
+    const ps = new ParticleSystem('coinFx', count, scene)
+    ps.particleTexture = getFlareTexture(scene)
     ps.emitter         = this.mesh
     ps.minSize         = 0.08; ps.maxSize         = 0.22
     ps.minLifeTime     = 0.20; ps.maxLifeTime     = 0.40
-    ps.emitRate        = 0;    ps.manualEmitCount = 30
+    ps.emitRate        = 0;    ps.manualEmitCount = count
     ps.color1          = new Color4(1, 0.95, 0, 1)
     ps.color2          = new Color4(1, 0.8, 0.2, 1)
     ps.colorDead       = new Color4(1, 1, 0, 0)

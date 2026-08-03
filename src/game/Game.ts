@@ -16,6 +16,11 @@ import { type GameSettings, SPEED_MIN, SPEED_MAX } from './ui/Settings'
 const BASE_SPEED = 11
 const ACCEL      = 0.42
 
+// Freeze frame on impact. A few tens of milliseconds of stopped time is
+// the cheapest way to make a collision land as a hit rather than a
+// clipping glitch — the eye reads the pause as force.
+const HIT_STOP_SECS = 0.09
+
 export class Game {
   private engine:       GameEngine
   private camera:       FollowCamera
@@ -32,6 +37,7 @@ export class Game {
   private running       = false
   private paused        = false
   private totalDistance = 0
+  private hitStopTimer  = 0
 
   // Live settings (updated immediately when changed in UI)
   private settings: GameSettings
@@ -42,7 +48,7 @@ export class Game {
 
     const envAssets = setupEnvironment(scene)
 
-    this.player    = new Player(scene)
+    this.player    = new Player(scene, this.engine)
     this.camera    = new FollowCamera(scene)
     this.track     = new TrackManager(scene)
     this.obstacles = new ObstacleManager(scene)
@@ -75,7 +81,7 @@ export class Game {
 
     scene.onAfterRenderObservable.addOnce(() => {
       if (scene.activeCamera) {
-        const pipeline = setupPostProcessing(scene, scene.activeCamera, this.engine.sunLight)
+        const pipeline = setupPostProcessing(scene, scene.activeCamera, this.engine.quality)
         this.zones!.setPipeline(pipeline)
       }
       this.speedLines   = new SpeedLines(scene, this.player.mesh)
@@ -124,8 +130,17 @@ export class Game {
   }
 
   private _tick(): void {
-    const dt = Math.min(this.engine.deltaTime, 0.05)
+    const rawDt = Math.min(this.engine.deltaTime, 0.05)
     if (!this.running || this.paused) return
+
+    // Hit-stop: hold the world still for a beat after an impact. The
+    // camera still updates so the shake reads during the freeze.
+    if (this.hitStopTimer > 0) {
+      this.hitStopTimer -= rawDt
+      this.camera.update(this.player.position, rawDt, this._speedFrac())
+      return
+    }
+    const dt = rawDt
 
     // Speed: auto-increase or hold manual constant
     if (this.settings.speedMode === 'auto') {
@@ -135,23 +150,31 @@ export class Game {
     }
 
     this.totalDistance += this.runSpeed * dt
+    const speedFrac = this._speedFrac()
 
-    this.player.update(dt, this.runSpeed)
+    this.player.update(dt, this.runSpeed, speedFrac)
     this.track.update(this.player.position.z, this.totalDistance)
     this.obstacles.update(
       this.player,
       this.player.position.z,
       dt,
-      () => this.camera.shake(0.28, 0.38),
+      () => {
+        this.camera.shake(0.30, 0.40)
+        this.hitStopTimer = HIT_STOP_SECS
+      },
     )
-    this.camera.update(this.player.position, dt)
+    this.camera.update(this.player.position, dt, speedFrac)
     this.engine.updateLampLights(this.player.position.z)
 
     this.zones?.update(this.totalDistance, dt)
     this.speedLines?.setSpeed(this.runSpeed, SPEED_MAX)
     this.celebrations?.checkMilestone(this.totalDistance)
 
-    const speedFrac = (this.runSpeed - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)
-    this.hud.update(this.totalDistance, this.obstacles.score / 10, Math.max(0, Math.min(1, speedFrac)))
+    this.hud.update(this.totalDistance, this.obstacles.score / 10, speedFrac)
+  }
+
+  private _speedFrac(): number {
+    const f = (this.runSpeed - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)
+    return Math.max(0, Math.min(1, f))
   }
 }

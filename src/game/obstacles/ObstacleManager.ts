@@ -1,4 +1,4 @@
-import {
+﻿import {
   Scene,
   Mesh,
   MeshBuilder,
@@ -16,7 +16,16 @@ const PLAYER_HALF    = 0.38   // half player body size added to each collision s
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Obstacle { mesh: Mesh; collW: number; collD: number }
+/**
+ * `bottom`/`top` are the obstacle's solid vertical span above the road.
+ *
+ * Without them, collision was a 2D test on x and z, so jumping over a
+ * car and sliding under a sign both did exactly nothing — the two
+ * inputs the whole genre is built on were decorative. A vehicle spans
+ * from the road up; a gantry spans from head height up, leaving a gap
+ * to slide through.
+ */
+interface Obstacle { mesh: Mesh; collW: number; collD: number; bottom: number; top: number }
 interface Coin     { mesh: Mesh; collected: boolean; bobOffset: number }
 
 // ─── Material cache ───────────────────────────────────────────────────────────
@@ -114,12 +123,20 @@ export class ObstacleManager {
     const roll = Math.random()
     let obs: Obstacle
 
-    if (roll < 0.42) {
-      // Single-lane car
+    // Weighted so roughly a third of spawns are the two obstacles that
+    // *require* a jump or a slide. Vehicles can only be dodged sideways,
+    // and a track made solely of them gives the player nothing to do
+    // with two of their three inputs.
+    if (roll < 0.20) {
+      const lane = Math.floor(Math.random() * 3)
+      obs = this._makeBarrier(z, LANE_POSITIONS[lane])       // jump over
+    } else if (roll < 0.36) {
+      const lane = Math.floor(Math.random() * 3)
+      obs = this._makeGantry(z, LANE_POSITIONS[lane])        // slide under
+    } else if (roll < 0.60) {
       const lane = Math.floor(Math.random() * 3)
       obs = this._makeCar(z, LANE_POSITIONS[lane])
-    } else if (roll < 0.74) {
-      // Single-lane delivery truck
+    } else if (roll < 0.82) {
       const lane = Math.floor(Math.random() * 3)
       obs = this._makeTruck(z, LANE_POSITIONS[lane])
     } else {
@@ -129,6 +146,102 @@ export class ObstacleManager {
     }
 
     this.obstacles.push(obs)
+  }
+
+  // ─── Road barrier (jump over) ─────────────────────────────────────────────
+  //
+  //  Low enough to clear with a jump, tall enough that running into it
+  //  reads as your own mistake. Chevron stripes because a solid slab at
+  //  this size is hard to distinguish from road at speed.
+  //
+  private _makeBarrier(z: number, x: number): Obstacle {
+    const root    = new Mesh('barrier', this.scene)
+    root.position = new Vector3(x, 0, z)
+
+    const frameMat  = _pbr(this.scene, new Color3(0.92, 0.92, 0.94), 0.1, 0.55)
+    const stripeMat = _pbr(this.scene, new Color3(0.95, 0.30, 0.05), 0.0, 0.60)
+    const legMat    = _pbr(this.scene, new Color3(0.20, 0.20, 0.24), 0.3, 0.70)
+
+    // Main plank
+    const plank = MeshBuilder.CreateBox('plank', { width: 2.10, height: 0.42, depth: 0.16 }, this.scene)
+    plank.position = new Vector3(0, 0.60, 0)
+    plank.material = frameMat
+    plank.parent   = root
+
+    // Angled chevrons across the plank face
+    for (let i = -2; i <= 2; i++) {
+      const stripe = MeshBuilder.CreateBox('stripe', { width: 0.26, height: 0.44, depth: 0.05 }, this.scene)
+      stripe.position = new Vector3(i * 0.40, 0.60, -0.10)
+      stripe.rotation.z = 0.45
+      stripe.material = stripeMat
+      stripe.parent   = root
+    }
+
+    // Second, lower rail so the silhouette reads as a barrier not a sign
+    const rail = MeshBuilder.CreateBox('rail', { width: 2.10, height: 0.14, depth: 0.12 }, this.scene)
+    rail.position = new Vector3(0, 0.26, 0)
+    rail.material = stripeMat
+    rail.parent   = root
+
+    for (const side of [-1, 1]) {
+      const leg = MeshBuilder.CreateBox('leg', { width: 0.12, height: 0.82, depth: 0.12 }, this.scene)
+      leg.position = new Vector3(side * 0.95, 0.41, 0)
+      leg.material = legMat
+      leg.parent   = root
+    }
+
+    return { mesh: root as unknown as Mesh, collW: 1.05, collD: 0.35, bottom: 0, top: 0.82 }
+  }
+
+  // ─── Overhead gantry (slide under) ────────────────────────────────────────
+  //
+  //  The underside sits at 1.35 — above a sliding player (0.70) and
+  //  below a standing one (1.50), so the slide is the only way through.
+  //
+  private _makeGantry(z: number, x: number): Obstacle {
+    const root    = new Mesh('gantry', this.scene)
+    root.position = new Vector3(x, 0, z)
+
+    const postMat  = _pbr(this.scene, new Color3(0.42, 0.44, 0.48), 0.55, 0.45)
+    const signMat  = _pbr(this.scene, new Color3(0.06, 0.42, 0.20), 0.0, 0.65)
+    const trimMat  = _pbr(this.scene, new Color3(0.95, 0.95, 0.95), 0.0, 0.50)
+    const lampMat  = _emissive(this.scene, new Color3(1.00, 0.72, 0.10))
+
+    // Uprights sit outside the lane so they never block the slide path
+    for (const side of [-1, 1]) {
+      const post = MeshBuilder.CreateCylinder('post',
+        { diameter: 0.20, height: 3.40, tessellation: 10 }, this.scene)
+      post.position = new Vector3(side * 1.35, 1.70, 0)
+      post.material = postMat
+      post.parent   = root
+    }
+
+    // Cross beam — the underside of this is the clearance line
+    const beam = MeshBuilder.CreateBox('beam', { width: 2.90, height: 0.22, depth: 0.30 }, this.scene)
+    beam.position = new Vector3(0, 1.48, 0)
+    beam.material = postMat
+    beam.parent   = root
+
+    // Sign board hanging above the beam
+    const board = MeshBuilder.CreateBox('board', { width: 2.40, height: 1.10, depth: 0.14 }, this.scene)
+    board.position = new Vector3(0, 2.20, 0)
+    board.material = signMat
+    board.parent   = root
+
+    const trim = MeshBuilder.CreateBox('trim', { width: 2.52, height: 1.22, depth: 0.08 }, this.scene)
+    trim.position = new Vector3(0, 2.20, 0.05)
+    trim.material = trimMat
+    trim.parent   = root
+
+    // Warning lamps on the underside — draws the eye to the gap
+    for (const side of [-1, 1]) {
+      const lamp = MeshBuilder.CreateSphere('lamp', { diameter: 0.16, segments: 8 }, this.scene)
+      lamp.position = new Vector3(side * 0.75, 1.36, -0.10)
+      lamp.material = lampMat
+      lamp.parent   = root
+    }
+
+    return { mesh: root as unknown as Mesh, collW: 1.20, collD: 0.30, bottom: 1.35, top: 3.40 }
   }
 
   // ─── Car (sedan) ──────────────────────────────────────────────────────────
@@ -210,7 +323,7 @@ export class ObstacleManager {
       this._addWheel(root, new Vector3(wx, wR, wz), wR, wW)
     }
 
-    return { mesh: root as unknown as Mesh, collW: 0.84, collD: 1.55 }
+    return { mesh: root as unknown as Mesh, collW: 0.84, collD: 1.55, bottom: 0, top: 1.45 }
   }
 
   // ─── Delivery truck ───────────────────────────────────────────────────────
@@ -332,7 +445,7 @@ export class ObstacleManager {
       this._addWheel(root, new Vector3(wx, wR, -1.55), wR, wW)
     }
 
-    return { mesh: root as unknown as Mesh, collW: 0.94, collD: 2.00 }
+    return { mesh: root as unknown as Mesh, collW: 0.94, collD: 2.00, bottom: 0, top: 2.70 }
   }
 
   // ─── School bus (spans 2 lanes) ───────────────────────────────────────────
@@ -460,7 +573,7 @@ export class ObstacleManager {
       this._addWheel(root, new Vector3(wx, wR, wz), wR, wW)
     }
 
-    return { mesh: root as unknown as Mesh, collW: 1.55, collD: 1.60 }
+    return { mesh: root as unknown as Mesh, collW: 1.55, collD: 1.60, bottom: 0, top: 3.00 }
   }
 
   // ─── Wheel builder ─────────────────────────────────────────────────────────
@@ -528,7 +641,12 @@ export class ObstacleManager {
       if (!player.isInvincible) {
         const dx = Math.abs(pp.x - op.x)
         const dz = Math.abs(pp.z - op.z)
-        if (dx < obs.collW + PLAYER_HALF && dz < obs.collD + PLAYER_HALF) {
+        // Vertical overlap is what makes jumping and sliding matter:
+        // clear a barrier's top or duck below a gantry's underside and
+        // the spans don't intersect, so there's no hit.
+        const vertical =
+          player.bodyBottom < obs.top && player.bodyTop > obs.bottom
+        if (dx < obs.collW + PLAYER_HALF && dz < obs.collD + PLAYER_HALF && vertical) {
           player.handleCollision()
           onShake()
         }

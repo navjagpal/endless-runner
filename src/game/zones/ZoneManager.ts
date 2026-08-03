@@ -1,4 +1,4 @@
-import {
+﻿import {
   Scene,
   Color3,
   DirectionalLight,
@@ -43,19 +43,19 @@ export interface ZoneConfig {
 export const ZONES: ZoneConfig[] = [
   // 0 — Meadow
   {
-    id: 'meadow', label: 'Meadow', emoji: '🌸', startDist: 0,
+    id: 'meadow', label: 'Meadow', emoji: 'ðŸŒ¸', startDist: 0,
     skyTurbidity: 5,  skyInclination: 0.38, skyRayleigh: 2.0, skyAzimuth: 0.25, skyLuminance: 1.00,
     fogColor:    new Color3(0.72, 0.88, 0.98), fogDensity: 0.005,
     clearColor:  [0.55, 0.78, 0.95],
     groundColor: new Color3(0.22, 0.55, 0.15), roadColor: new Color3(0.22, 0.22, 0.26),
     sunColor:    new Color3(1.00, 0.95, 0.85), sunIntensity: 1.2,
     hemiDiffuse: new Color3(0.80, 0.90, 1.00), hemiGround: new Color3(0.40, 0.30, 0.20), hemiIntensity: 0.65,
-    contrast: 1.10, exposure: 1.05, saturation: 112, vignetteWeight: 2.8,
+    contrast: 1.10, exposure: 1.05, saturation: 132, vignetteWeight: 1.4,
     bpm: 132,
   },
   // 1 — Forest  (green hue fixed: hemiDiffuse desaturated, fog less green, density halved)
   {
-    id: 'forest', label: 'Forest', emoji: '🌲', startDist: 500,
+    id: 'forest', label: 'Forest', emoji: 'ðŸŒ²', startDist: 500,
     skyTurbidity: 12, skyInclination: 0.30, skyRayleigh: 2.5, skyAzimuth: 0.35, skyLuminance: 0.90,
     fogColor:    new Color3(0.52, 0.66, 0.50), fogDensity: 0.010,
     clearColor:  [0.38, 0.54, 0.36],
@@ -63,31 +63,31 @@ export const ZONES: ZoneConfig[] = [
     sunColor:    new Color3(0.75, 0.92, 0.60), sunIntensity: 0.95,
     // was hemiDiffuse(0.35,0.65,0.35) — very saturated green; now more neutral:
     hemiDiffuse: new Color3(0.55, 0.72, 0.50), hemiGround: new Color3(0.22, 0.32, 0.14), hemiIntensity: 0.58,
-    contrast: 1.14, exposure: 0.95, saturation: 95, vignetteWeight: 3.2,
+    contrast: 1.14, exposure: 0.95, saturation: 118, vignetteWeight: 1.6,
     bpm: 108,
   },
   // 2 — City
   {
-    id: 'city', label: 'City', emoji: '🏙️', startDist: 1000,
+    id: 'city', label: 'City', emoji: 'ðŸ™ï¸', startDist: 1000,
     skyTurbidity: 18, skyInclination: 0.08, skyRayleigh: 3.5, skyAzimuth: 0.50, skyLuminance: 0.80,
     fogColor:    new Color3(0.72, 0.52, 0.42), fogDensity: 0.009,
     clearColor:  [0.78, 0.52, 0.38],
     groundColor: new Color3(0.28, 0.28, 0.30), roadColor: new Color3(0.26, 0.26, 0.30),
     sunColor:    new Color3(1.00, 0.65, 0.35), sunIntensity: 1.1,
     hemiDiffuse: new Color3(1.00, 0.70, 0.50), hemiGround: new Color3(0.30, 0.25, 0.20), hemiIntensity: 0.70,
-    contrast: 1.15, exposure: 1.10, saturation: 122, vignetteWeight: 3.0,
+    contrast: 1.15, exposure: 1.10, saturation: 140, vignetteWeight: 1.5,
     bpm: 148,
   },
   // 3 — Beach
   {
-    id: 'beach', label: 'Beach', emoji: '🌊', startDist: 1500,
+    id: 'beach', label: 'Beach', emoji: 'ðŸŒŠ', startDist: 1500,
     skyTurbidity: 3,  skyInclination: 0.48, skyRayleigh: 1.5, skyAzimuth: 0.15, skyLuminance: 1.10,
     fogColor:    new Color3(0.78, 0.92, 0.96), fogDensity: 0.004,
     clearColor:  [0.60, 0.85, 0.95],
     groundColor: new Color3(0.90, 0.80, 0.52), roadColor: new Color3(0.80, 0.72, 0.52),
     sunColor:    new Color3(1.00, 0.98, 0.90), sunIntensity: 1.4,
     hemiDiffuse: new Color3(0.90, 0.95, 1.00), hemiGround: new Color3(0.85, 0.78, 0.42), hemiIntensity: 0.80,
-    contrast: 1.05, exposure: 1.15, saturation: 128, vignetteWeight: 2.2,
+    contrast: 1.05, exposure: 1.15, saturation: 145, vignetteWeight: 1.1,
     bpm: 128,
   },
   // 4 — Space (dark)
@@ -99,7 +99,7 @@ export const ZONES: ZoneConfig[] = [
     groundColor: new Color3(0.04, 0.04, 0.10), roadColor: new Color3(0.06, 0.06, 0.18),
     sunColor:    new Color3(0.50, 0.40, 0.90), sunIntensity: 0.7,
     hemiDiffuse: new Color3(0.25, 0.15, 0.55), hemiGround: new Color3(0.08, 0.04, 0.18), hemiIntensity: 0.35,
-    contrast: 1.20, exposure: 1.20, saturation: 75, vignetteWeight: 4.0,
+    contrast: 1.20, exposure: 1.20, saturation: 108, vignetteWeight: 2.0,
     bpm: 120,
   },
 ]
@@ -114,7 +114,7 @@ const FOREST_BRIGHT: ZoneConfig = {
   clearColor:  [0.55, 0.76, 0.52],
   sunColor:    new Color3(0.96, 0.98, 0.88), sunIntensity: 1.20,
   hemiDiffuse: new Color3(0.76, 0.90, 0.70), hemiGround: new Color3(0.38, 0.50, 0.22), hemiIntensity: 0.72,
-  contrast: 1.08, exposure: 1.10, saturation: 112, vignetteWeight: 2.6,
+  contrast: 1.08, exposure: 1.10, saturation: 132, vignetteWeight: 1.3,
 }
 
 // Bright space = vivid cosmic purple/nebula — clearly space, but well-lit
@@ -125,7 +125,7 @@ const SPACE_BRIGHT: ZoneConfig = {
   clearColor:  [0.20, 0.08, 0.48],
   sunColor:    new Color3(0.75, 0.55, 1.00), sunIntensity: 1.15,
   hemiDiffuse: new Color3(0.60, 0.42, 0.92), hemiGround: new Color3(0.28, 0.16, 0.52), hemiIntensity: 0.78,
-  contrast: 1.10, exposure: 1.30, saturation: 108, vignetteWeight: 2.8,
+  contrast: 1.10, exposure: 1.30, saturation: 128, vignetteWeight: 1.4,
 }
 
 // Per-index override; null = use standard zone

@@ -4,97 +4,86 @@ import {
   DefaultRenderingPipeline,
   Color4,
   ColorCurves,
-  SSAO2RenderingPipeline,
-  VolumetricLightScatteringPostProcess, // Added
-  Mesh, // Added
-  DirectionalLight, // Added
-  Texture, // Added
+  ImageProcessingConfiguration,
 } from '@babylonjs/core'
+import type { QualityProfile } from './DeviceTier'
 
-export function setupPostProcessing(scene: Scene, camera: Camera, sunLight: DirectionalLight): DefaultRenderingPipeline {
-  // ── Main pipeline (bloom, FXAA, chromatic aberration, vignette, color grading) ──
+/**
+ * Stylized post-processing.
+ *
+ * This used to stack chromatic aberration, depth of field, ACES filmic
+ * tonemapping, volumetric god rays and SSAO2 — a photorealism toolkit
+ * applied to a scene made of untextured primitives. It cost a lot and
+ * pushed the image *away* from the reference look.
+ *
+ * Subway-Surfers-class mobile runners use almost none of that. They are
+ * flat, saturated, high-contrast and readable at a glance, because the
+ * player has to parse three lanes of obstacles at speed. What survives
+ * here is the short list that actually serves that: bloom on the coins
+ * and lamps, antialiasing on the hard silhouette edges, and a colour
+ * grade with the saturation pushed up.
+ *
+ * Notably absent and deliberately so:
+ *   - Depth of field: blurs exactly the obstacles the player is trying
+ *     to read, and burns two full-res passes to do it.
+ *   - Chromatic aberration: a lens artifact. This scene has no lens.
+ *   - SSAO2: needs a depth prepass and a wide blur. Contact shadows on
+ *     flat-shaded boxes are close to invisible.
+ *   - Volumetric scattering: 100 texture fetches per pixel.
+ */
+export function setupPostProcessing(
+  scene: Scene,
+  camera: Camera,
+  quality: QualityProfile,
+): DefaultRenderingPipeline {
   const pipeline = new DefaultRenderingPipeline('pipeline', true, scene, [camera])
 
-  // Bloom — emissive lamps, coin glows
-  pipeline.bloomEnabled   = true
-  pipeline.bloomThreshold = 0.50
-  pipeline.bloomWeight    = 0.60
-  pipeline.bloomKernel    = 128
+  // ── Bloom — coin glints, lamp glow, celebration bursts ──────────────
+  pipeline.bloomEnabled   = quality.bloom
+  pipeline.bloomThreshold = 0.72   // was 0.50, which bloomed ordinary
+                                   // mid-tones and washed the image out
+  pipeline.bloomWeight    = 0.45
+  pipeline.bloomKernel    = quality.bloomKernel
   pipeline.bloomScale     = 0.5
 
-  // FXAA
-  pipeline.fxaaEnabled = true
+  pipeline.fxaaEnabled = quality.fxaa
 
-  // Chromatic aberration — subtle lens feel
-  pipeline.chromaticAberrationEnabled               = true
-  pipeline.chromaticAberration.aberrationAmount     = 1.2
-  pipeline.chromaticAberration.radialIntensity      = 0.8
+  // Explicitly off — see the note above. Listed rather than omitted so
+  // it's obvious these were considered and rejected, not forgotten.
+  pipeline.chromaticAberrationEnabled = false
+  pipeline.depthOfFieldEnabled        = false
+  pipeline.grainEnabled               = false
+  pipeline.sharpenEnabled             = false
 
-  // Depth of field — foreground sharp, far background blurs
-  pipeline.depthOfFieldEnabled                      = true
-  pipeline.depthOfField.focalLength                 = 150     // mm
-  pipeline.depthOfField.fStop                       = 2.8
-  pipeline.depthOfField.focusDistance               = 6000    // mm ahead (~6m in scene units)
-  pipeline.depthOfField.lensSize                    = 50
+  // ── Colour grade ────────────────────────────────────────────────────
+  pipeline.imageProcessingEnabled = true
+  const ip = pipeline.imageProcessing
 
-  // Image processing
-  pipeline.imageProcessingEnabled                   = true
-  pipeline.imageProcessing.toneMappingEnabled       = true
-  pipeline.imageProcessing.toneMappingType          = 1        // ACES filmic
-  pipeline.imageProcessing.vignetteEnabled          = true
-  pipeline.imageProcessing.vignetteWeight           = 2.8
-  pipeline.imageProcessing.vignetteColor            = new Color4(0, 0, 0, 0)
-  pipeline.imageProcessing.contrast                 = 1.10
-  pipeline.imageProcessing.exposure                 = 1.05
+  // Standard tonemapping, not ACES. ACES rolls highlights off toward a
+  // filmic desaturation — the opposite of the punchy, poster-flat look
+  // the reference has.
+  ip.toneMappingEnabled = true
+  ip.toneMappingType    = ImageProcessingConfiguration.TONEMAPPING_STANDARD
 
-  // Color curves (saturation, etc.)
-  pipeline.imageProcessing.colorCurvesEnabled       = true
+  ip.contrast = 1.15
+  ip.exposure = 1.05
+
+  // A light vignette frames the corridor. The old weight of 2.8 was
+  // heavy enough to darken obstacles entering from the screen edges,
+  // which is precisely where they need to be readable.
+  ip.vignetteEnabled = true
+  ip.vignetteWeight  = 1.4
+  ip.vignetteColor   = new Color4(0, 0, 0, 0)
+
+  ip.colorCurvesEnabled = true
   const curves = new ColorCurves()
-  curves.globalSaturation = 115
-  curves.highlightsDensity = 10
-  curves.shadowsDensity    = -10
-  pipeline.imageProcessing.colorCurves = curves
-
-  // ── Volumetric Light Scattering (God Rays) ──
-  try {
-    // Create a mesh to act as the light source for volumetric scattering
-    const godRayLightMesh = Mesh.CreateSphere('godRayLightMesh', 16, 1.0, scene)
-    godRayLightMesh.position = sunLight.position.clone()
-    godRayLightMesh.isVisible = false // Make it invisible
-
-    const volumetricLight = new VolumetricLightScatteringPostProcess(
-      'volumetricLight',
-      1.0, // Render ratio
-      camera,
-      godRayLightMesh,
-      100, // Samples
-      Texture.BILINEAR_SAMPLINGMODE,
-      scene.getEngine(), // Corrected: Pass the engine instead of the scene
-      false // Use only one post process
-    )
-    volumetricLight.exposure = 0.15
-    volumetricLight.decay = 0.99
-    volumetricLight.density = 0.9
-    volumetricLight.weight = 0.8
-    volumetricLight.excludedMeshes.push(godRayLightMesh) // Exclude the light mesh itself
-
-  } catch (e) {
-    console.warn('Volumetric Light Scattering not supported or failed to initialize:', e)
-  }
-
-  // ── SSAO — ambient occlusion for contact shadows ──
-  try {
-    const ssao = new SSAO2RenderingPipeline('ssao', scene, { ssaoRatio: 0.5, blurRatio: 1 }, [camera])
-    ssao.radius        = 2.0
-    ssao.totalStrength = 1.3
-    ssao.maxZ          = 120
-    ssao.samples       = 16
-    ssao.expensiveBlur = true
-    // Attach SSAO to scene render pipeline manager
-    scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', camera)
-  } catch {
-    // SSAO2 not supported on this device — silently skip
-  }
+  curves.globalSaturation    = 135   // the single biggest "this looks like
+                                     // a kids' game" lever there is
+  curves.highlightsSaturation = 115
+  curves.shadowsSaturation    = 120
+  curves.highlightsDensity    = 15
+  curves.shadowsDensity       = -12
+  ip.colorCurves = curves
 
   return pipeline
 }

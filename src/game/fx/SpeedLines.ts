@@ -1,23 +1,22 @@
 import {
   Scene,
   ParticleSystem,
-  Texture,
   Color4,
   Vector3,
   Mesh,
 } from '@babylonjs/core'
+import { getSoftDiscTexture } from './Textures'
+import { getQualityProfile } from '../core/DeviceTier'
 
 export class SpeedLines {
   private ps: ParticleSystem
+  private capacityScale: number
 
   constructor(scene: Scene, emitter: Mesh) {
-    this.ps = new ParticleSystem('speedLines', 500, scene)
+    this.capacityScale = getQualityProfile().particleScale
+    this.ps = new ParticleSystem('speedLines', Math.ceil(500 * this.capacityScale), scene)
 
-    // Use Babylon.js hosted flare texture (tiny CDN hit, cached after first load)
-    this.ps.particleTexture = new Texture(
-      'https://assets.babylonjs.com/particles/flare.png',
-      scene
-    )
+    this.ps.particleTexture = getSoftDiscTexture(scene)
 
     this.ps.emitter = emitter
     // Spawn in a wide corridor ahead of the player
@@ -49,6 +48,6 @@ export class SpeedLines {
   setSpeed(speed: number, maxSpeed: number): void {
     const threshold = maxSpeed * 0.55
     const t = Math.max(0, (speed - threshold) / (maxSpeed - threshold))
-    this.ps.emitRate = Math.floor(t * t * 320)
+    this.ps.emitRate = Math.floor(t * t * 320 * this.capacityScale)
   }
 }
