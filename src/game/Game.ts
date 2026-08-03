@@ -75,7 +75,7 @@ export class Game {
 
     scene.onAfterRenderObservable.addOnce(() => {
       if (scene.activeCamera) {
-        const pipeline = setupPostProcessing(scene, scene.activeCamera)
+        const pipeline = setupPostProcessing(scene, scene.activeCamera, this.engine.sunLight)
         this.zones!.setPipeline(pipeline)
       }
       this.speedLines   = new SpeedLines(scene, this.player.mesh)

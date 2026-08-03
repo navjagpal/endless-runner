@@ -5,9 +5,13 @@ import {
   Color4,
   ColorCurves,
   SSAO2RenderingPipeline,
+  VolumetricLightScatteringPostProcess, // Added
+  Mesh, // Added
+  DirectionalLight, // Added
+  Texture, // Added
 } from '@babylonjs/core'
 
-export function setupPostProcessing(scene: Scene, camera: Camera): DefaultRenderingPipeline {
+export function setupPostProcessing(scene: Scene, camera: Camera, sunLight: DirectionalLight): DefaultRenderingPipeline {
   // ── Main pipeline (bloom, FXAA, chromatic aberration, vignette, color grading) ──
   const pipeline = new DefaultRenderingPipeline('pipeline', true, scene, [camera])
 
@@ -50,6 +54,33 @@ export function setupPostProcessing(scene: Scene, camera: Camera): DefaultRender
   curves.highlightsDensity = 10
   curves.shadowsDensity    = -10
   pipeline.imageProcessing.colorCurves = curves
+
+  // ── Volumetric Light Scattering (God Rays) ──
+  try {
+    // Create a mesh to act as the light source for volumetric scattering
+    const godRayLightMesh = Mesh.CreateSphere('godRayLightMesh', 16, 1.0, scene)
+    godRayLightMesh.position = sunLight.position.clone()
+    godRayLightMesh.isVisible = false // Make it invisible
+
+    const volumetricLight = new VolumetricLightScatteringPostProcess(
+      'volumetricLight',
+      1.0, // Render ratio
+      camera,
+      godRayLightMesh,
+      100, // Samples
+      Texture.BILINEAR_SAMPLINGMODE,
+      scene.getEngine(), // Corrected: Pass the engine instead of the scene
+      false // Use only one post process
+    )
+    volumetricLight.exposure = 0.15
+    volumetricLight.decay = 0.99
+    volumetricLight.density = 0.9
+    volumetricLight.weight = 0.8
+    volumetricLight.excludedMeshes.push(godRayLightMesh) // Exclude the light mesh itself
+
+  } catch (e) {
+    console.warn('Volumetric Light Scattering not supported or failed to initialize:', e)
+  }
 
   // ── SSAO — ambient occlusion for contact shadows ──
   try {
