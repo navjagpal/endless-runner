@@ -18,8 +18,34 @@ import type { GameEngine } from '../core/GameEngine'
 import { getFlareTexture, getBlobShadowTexture } from '../fx/Textures'
 import { getQualityProfile } from '../core/DeviceTier'
 
-const JUMP_HEIGHT        = 3.2
-const JUMP_RISE_TIME     = 0.42
+/**
+ * Jump apex, and it's a balance point rather than a feel knob.
+ *
+ * Now that obstacles have a solid vertical span, the apex decides what is
+ * jumpable and therefore what the other inputs are *for*:
+ *
+ *   barrier  0.82  — clears easily; the jump's bread and butter
+ *   car      1.45  — clears with decent timing; rewarding
+ *   truck    2.21  ┐ must NOT clear, or lane-changing becomes pointless
+ *   bus      2.24  ┘ and the rooftop ramps have no reason to exist
+ *
+ * The old 3.2 predates solid spans — back then jumping had no effect on
+ * collision at all, so the value was free. At 3.2 a well-timed jump now
+ * clears everything in the game, so it comes down to sit between the car
+ * and the truck.
+ *
+ * Height alone isn't enough though: clearing an obstacle means staying
+ * above it for the *whole* time the bodies overlap in z, and a car's
+ * overlap window is 3.86 units. At the starting speed of 11 that's 0.35 s
+ * of hang time needed — so the rise time matters as much as the apex, and
+ * a value tuned only against the apex leaves the car unjumpable at slow
+ * speed but jumpable once the run speeds up.
+ *
+ * These two were solved for rather than guessed: apex 2.15 (0.06 under
+ * the truck roof) with the car clearing at every speed from 11 to 28.
+ */
+const JUMP_HEIGHT        = 2.25
+const JUMP_RISE_TIME     = 0.37
 // Falling faster than rising is the oldest trick in platformer feel:
 // it keeps the airtime readable while making the landing feel decisive.
 const FALL_MULTIPLIER    = 1.55
@@ -54,8 +80,13 @@ export class Player {
   private laneX: number
   private lateralVel = 0
 
+  // posY is the absolute height of the feet above the road (y=0).
+  // groundY is the height of whatever surface is under the player right now
+  // — 0 on the road, higher on a ramp or a vehicle rooftop. ObstacleManager
+  // resolves it and pushes it in each frame before update().
   private posY = 0
   private velY = 0
+  private groundY = 0
 
   private slideTimer  = 0
   private bumpTimer   = 0
@@ -170,11 +201,20 @@ export class Player {
 
   private _tryJump(): boolean {
     if (this.state === 'jumping' || this.state === 'bumping') return false
+    // Jumping is legal from any surface, not just the road — standing on a
+    // vehicle rooftop still counts as grounded. What's disallowed is
+    // jumping again while genuinely in the air.
+    if (this.airborne) return false
     if (this.state === 'sliding') this.slideTimer = 0   // slide cancels into a jump
     this.state = 'jumping'
     this.velY  = (2 * JUMP_HEIGHT) / JUMP_RISE_TIME
     this.audio?.playJump()
     return true
+  }
+
+  /** True when the feet are off the current surface. */
+  private get airborne(): boolean {
+    return this.state === 'jumping' || this.posY > this.groundY + 0.02
   }
 
   slide(): void {
@@ -227,7 +267,7 @@ export class Player {
     }
 
     this._updateLane(dt)
-    this._updateJump(dt)
+    this._updateVertical(dt)
 
     this.mesh.position.x  = this.laneX
     this.mesh.position.y  = 0.75 + this.posY
@@ -240,7 +280,11 @@ export class Player {
       speedFrac,
       lateralVel: this.lateralVel,
       verticalVel: this.velY,
-      height: this.posY,
+      // Height above the *current* surface, not above the road. Using the
+      // absolute height would read a player standing on a bus roof as
+      // permanently airborne, so the landing squash would never fire again
+      // after the first ramp.
+      height: Math.max(0, this.posY - this.groundY),
     })
   }
 
@@ -271,27 +315,44 @@ export class Player {
     this.lateralVel = dt > 0 ? (this.laneX - prevX) / dt : 0
   }
 
-  private _updateJump(dt: number): void {
-    if (this.state !== 'jumping') {
-      this.posY = 0
-      this.velY = 0
-      return
-    }
-    const g = (2 * JUMP_HEIGHT) / (JUMP_RISE_TIME * JUMP_RISE_TIME)
-    this.velY -= g * (this.velY < 0 ? FALL_MULTIPLIER : 1) * dt
-    this.posY += this.velY * dt
+  /**
+   * Vertical physics, unified so a ramp or rooftop behaves exactly like the
+   * road. Airborne means gravity; grounded means stick to the surface, which
+   * is what makes a ramp visibly carry the player upward and what makes
+   * running off the far end of a rooftop become a fall rather than a
+   * teleport to ground level.
+   */
+  private _updateVertical(dt: number): void {
+    if (this.airborne) {
+      const g = (2 * JUMP_HEIGHT) / (JUMP_RISE_TIME * JUMP_RISE_TIME)
+      this.velY -= g * (this.velY < 0 ? FALL_MULTIPLIER : 1) * dt
+      this.posY += this.velY * dt
 
-    if (this.posY <= 0) {
-      this.posY  = 0
-      this.velY  = 0
-      this.state = 'running'
+      if (this.posY <= this.groundY && this.velY <= 0) {
+        this.posY = this.groundY
+        this.velY = 0
+        if (this.state === 'jumping') this.state = 'running'
+      }
+    } else {
+      this.posY = this.groundY
+      this.velY = 0
     }
   }
 
-  /** Shadow stays on the ground and shrinks with altitude. */
+  /**
+   * Height of the surface under the player. Resolved and pushed in by
+   * ObstacleManager each frame, before update().
+   */
+  setGroundY(y: number): void { this.groundY = y }
+
+  /**
+   * Shadow sits on whatever surface is under the player and shrinks with
+   * height above it. Pinning it to y=0 would leave it on the road while the
+   * player ran along a bus roof two metres up.
+   */
   private _updateBlobShadow(): void {
-    const h = this.posY
-    this.blobShadow.position.set(this.laneX, 0.02, this.mesh.position.z)
+    const h = Math.max(0, this.posY - this.groundY)
+    this.blobShadow.position.set(this.laneX, this.groundY + 0.02, this.mesh.position.z)
     const k = Math.max(0.45, 1 - h / (JUMP_HEIGHT * 1.6))
     this.blobShadow.scaling.set(k, 1, k)
     this.blobShadow.visibility = 0.15 + 0.85 * k
