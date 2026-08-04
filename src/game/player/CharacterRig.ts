@@ -32,13 +32,35 @@ const MODEL_URL = `${import.meta.env.BASE_URL}models/runner.glb`
 /** "glTF" as a little-endian uint32 — the first four bytes of every GLB. */
 const GLB_MAGIC = 0x46546c67
 
-/** Keyword sets tried in order; first hit wins. */
+/**
+ * Keyword sets tried in order; first set that matches wins, and within a
+ * set every keyword must be present.
+ *
+ * Ordering carries real weight. The bundled Quaternius rig ships both
+ * `Man_Jump` (a standing hop) and `Man_RunningJump`, and a plain 'jump'
+ * search hits the standing one first purely because of glTF clip order.
+ * For an endless runner the running jump is obviously the right clip,
+ * so it gets its own earlier, more specific entry.
+ *
+ * The misspelled 'recieve' is deliberate — that's how Quaternius names
+ * the hit-reaction clip, and matching the correct spelling would miss it.
+ */
 const CLIP_KEYWORDS: Record<CharacterState, string[][]> = {
-  running:  [['sprint'], ['run'], ['jog'], ['walk']],
-  jumping:  [['jump'], ['leap'], ['air'], ['fall']],
-  sliding:  [['slide'], ['slid'], ['crouch'], ['roll'], ['duck']],
-  bumping:  [['stumble'], ['impact'], ['hit'], ['react'], ['bump'], ['trip']],
+  running:  [['sprint'], ['run', 'forward'], ['run'], ['jog'], ['walk']],
+  jumping:  [['running', 'jump'], ['run', 'jump'], ['jump'], ['leap'], ['air'], ['fall']],
+  sliding:  [['slide'], ['slid'], ['roll'], ['crouch'], ['duck'], ['dive']],
+  bumping:  [['stumble'], ['recieve'], ['receive'], ['impact'], ['hit'], ['react'], ['bump'], ['trip']],
 }
+
+/**
+ * Clips that must never be auto-matched.
+ *
+ * CC0 character packs are built for generic action games, so they carry
+ * combat and directional-strafe clips alongside the locomotion. A bare
+ * substring search happily binds `Run_Shoot` or `Run_Back` to the run
+ * state; excluding them is cheaper than making every keyword exact.
+ */
+const CLIP_BLOCKLIST = ['shoot', 'gun', 'sword', 'punch', 'kick', 'slash', 'back', 'left', 'right', 'death']
 
 const BLEND_SPEED = 8.0     // weight units/sec during a state cross-fade
 
@@ -46,7 +68,10 @@ function _findClip(groups: AnimationGroup[], state: CharacterState): AnimationGr
   for (const keywords of CLIP_KEYWORDS[state]) {
     const hit = groups.find(g => {
       const n = g.name.toLowerCase()
-      return keywords.every(k => n.includes(k))
+      if (!keywords.every(k => n.includes(k))) return false
+      // Don't let a blocked word veto a keyword we explicitly asked for
+      // — 'roll' should still match a clip literally named "Roll".
+      return !CLIP_BLOCKLIST.some(b => n.includes(b) && !keywords.includes(b))
     })
     if (hit) return hit
   }

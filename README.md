@@ -34,36 +34,47 @@ The game works offline and can be installed directly to your home screen:
 - **iOS (Safari):** Share → *Add to Home Screen*
 - **Desktop Chrome:** click the ⊕ icon in the address bar
 
-## Dropping in a character model
+## The character model
 
-The runner is procedural by default — no asset required. To replace it
-with a rigged, skinned character, save a GLB to:
+The game ships a rigged, skinned character at `public/models/runner.glb`
+— a CC0 model from Quaternius' Animated Men Pack (31 joints, 11 clips).
+See `public/models/CREDITS.md` for provenance and swap options.
 
-```
-public/models/runner.glb
-```
+There is also a fully procedural character built from primitives, used
+automatically whenever the GLB is missing or fails to parse. It's a real
+fallback, not a stub: two-segment limbs with knee and elbow bend,
+pelvis/chest counter-rotation, head stabilization, lean and landing
+squash.
 
-That's the whole install step. On startup the game fetches it, verifies
-the GLB magic bytes, lazily pulls in the glTF loader, rescales the model
-to the ~1.5-unit character the camera and collision are tuned around,
-and cross-fades between clips. If the file is missing or malformed it
-logs one line and keeps the procedural character.
+**To swap in a different character,** replace `public/models/runner.glb`
+with any rigged GLB. On startup the game verifies the GLB magic bytes,
+lazily pulls in the glTF loader, rescales the model to the ~1.5-unit
+character the camera and collision are tuned around, and cross-fades
+between clips.
 
-**Getting one from Mixamo** (free, needs an Adobe account):
+Clips are matched by keyword, not exact name, so most sources work
+untouched — `run`, `jump`, `slide`/`roll`, `stumble`/`hit` and several
+synonyms all resolve, with combat and strafe clips blocklisted so they
+can't bind by accident (see `CLIP_KEYWORDS` in
+`src/game/player/CharacterRig.ts`). **Any state whose clip is missing is
+synthesized procedurally**, so a model with only a run cycle still
+works — the bundled one has no slide or stumble clip and those are
+generated.
 
-1. Pick a character, then add the animations `Running`, `Jumping`,
-   `Running Slide`, and `Stumble Backwards`.
-2. Download each as FBX, **With Skin** for the first and **Without
-   Skin** for the rest.
-3. Merge them into one file with all four animations (Blender: import
-   all, then export glTF 2.0 with *Animation → Group by NLA Track*).
-4. Save the result as `public/models/runner.glb`.
+**From Mixamo** (free, needs an Adobe account) if you want all four
+states as real animation:
 
-Clip names are matched by keyword, not exactly — `running`, `jump`,
-`slide`, `stumble` and several synonyms all resolve (see
-`CLIP_KEYWORDS` in `src/game/player/CharacterRig.ts`). Any state whose
-clip is missing is synthesized procedurally instead, so a model with
-only a run cycle still works.
+1. Pick a character, then add `Running`, `Running Jump`, `Running
+   Slide`, and `Stumble Backwards`.
+2. Download each as FBX — **With Skin** for the first, **Without Skin**
+   for the rest.
+3. Merge into one file (Blender: import all, export glTF 2.0 with
+   *Animation → Group by NLA Track*).
+4. Save as `public/models/runner.glb`.
+
+> **Note on bundle size:** the model pushes the PWA precache to ~7.2 MB
+> against the 8 MB `maximumFileSizeToCacheInBytes` set in
+> `vite.config.ts`. A much larger character will need that limit raised.
 
 ## Performance
 
