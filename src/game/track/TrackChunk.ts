@@ -7,6 +7,7 @@ import {
   Material,
   Color3,
   Vector3,
+  VertexBuffer,
 } from '@babylonjs/core'
 import { styleChunk } from './ChunkStyling'
 import { getQualityProfile } from '../core/DeviceTier'
@@ -81,7 +82,7 @@ function initShared(scene: Scene): void {
  */
 function _plainMaterials(): Set<Material> {
   return new Set<Material>([
-    sharedRoadMat, sharedGrassMat, curbMat, dashMat, glowMat,
+    sharedRoadMat, curbMat, dashMat, glowMat,
   ])
 }
 
@@ -102,13 +103,7 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
   road.parent = root
 
   // ── Grass / ground shoulders ──
-  for (const side of [-1, 1]) {
-    const grass = MeshBuilder.CreateBox('grass', { width: 22, height: 0.15, depth: CHUNK_LENGTH }, scene)
-    grass.position = new Vector3(side * 15.5, -0.12, zMid)
-    grass.material = sharedGrassMat
-    grass.receiveShadows = true
-    grass.parent = root
-  }
+  for (const side of [-1, 1]) _addGroundShoulder(scene, root, side, zStart, zMid)
 
   // ── Curbs ──
   for (const side of [-1, 1]) {
@@ -153,6 +148,7 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
   // static, so nothing is lost by baking it down.
   const stats = styleChunk(root, {
     plainMaterials: _plainMaterials(),
+    authoredColorMaterials: new Set<Material>([sharedGrassMat]),
     flatShade: getQualityProfile().flatShade,
   })
   if (!_loggedStyleStats) {
@@ -164,6 +160,80 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
   }
 
   return { root, zStart, zEnd: zStart + CHUNK_LENGTH }
+}
+
+/**
+ * The verge either side of the road.
+ *
+ * This used to be a single flat box, which made it the largest unbroken
+ * area of one colour on the screen — and it got *more* conspicuous once
+ * the props around it were flat-shaded and gradiented, because it was
+ * then the only thing left with no form at all.
+ *
+ * A flat plane can't be helped by a vertical gradient, so it gets actual
+ * geometry instead: a subdivided grid with low-amplitude noise pushed
+ * through it. Combined with flat shading, the facets catch the sun at
+ * slightly different angles and the ground reads as terrain rather than
+ * as a fill colour. Per-vertex tint variation on top breaks up whatever
+ * uniformity survives.
+ *
+ * The displacement is faded out toward the road so the verge still meets
+ * the curb flush — a bumpy edge there would show daylight under the
+ * kerbstones.
+ */
+function _addGroundShoulder(scene: Scene, root: Mesh, side: number, zStart: number, zMid: number): void {
+  const WIDTH = 22
+  const COLS  = 10
+  const ROWS  = 10
+  const AMPLITUDE = 0.38
+
+  const ground = MeshBuilder.CreateGround('grass', {
+    width: WIDTH, height: CHUNK_LENGTH, subdivisionsX: COLS, subdivisionsY: ROWS,
+  }, scene)
+  ground.position = new Vector3(side * 15.5, -0.05, zMid)
+
+  const positions = ground.getVerticesData(VertexBuffer.PositionKind)
+  if (positions) {
+    const colors = new Float32Array((positions.length / 3) * 4)
+    for (let i = 0, c = 0; i < positions.length; i += 3, c += 4) {
+      const lx = positions[i]      // local x, -WIDTH/2 .. WIDTH/2
+      const lz = positions[i + 2]
+      // World x of this vertex; distance from the road edge decides how
+      // much displacement it's allowed.
+      const worldX = side * 15.5 + lx
+      const fromRoad = Math.max(0, Math.abs(worldX) - 5.6)
+      const fade = Math.min(1, fromRoad / 3.5)
+
+      // Cheap deterministic noise — two offset sine products. Value noise
+      // would be better but this is a verge seen at speed, not a heightmap.
+      const wx = worldX * 0.35
+      const wz = (zStart + lz) * 0.28
+      const n = Math.sin(wx) * Math.cos(wz) + 0.5 * Math.sin(wx * 2.3 + 1.7) * Math.cos(wz * 1.9)
+
+      // The undulation hangs *below* the road plane and never rises above
+      // it. The camera sits low and sights a long way down the corridor,
+      // so ground even a few centimetres proud of the road stacks up in
+      // perspective into a band that closes over the track and hides the
+      // obstacles the player is trying to read. Mapping the noise to
+      // [-AMPLITUDE, 0] rather than ±AMPLITUDE keeps all the shape and
+      // makes that failure geometrically impossible.
+      positions[i + 1] = Math.min(0, (n - 1) * 0.5) * AMPLITUDE * fade
+
+      // Tint follows the height a little, plus a small independent wobble,
+      // so even the flat strip beside the road isn't one solid colour.
+      const tint = 0.88 + n * 0.10 + Math.sin(wx * 5.1 + wz * 3.3) * 0.045
+      colors[c] = colors[c + 1] = colors[c + 2] = tint
+      colors[c + 3] = 1
+    }
+    ground.setVerticesData(VertexBuffer.PositionKind, positions, false)
+    ground.setVerticesData(VertexBuffer.ColorKind, colors, false)
+    ground.useVertexColors = true
+    ground.createNormals(false)
+  }
+
+  ground.material = sharedGrassMat
+  ground.receiveShadows = true
+  ground.parent = root
 }
 
 // ─── Zone prop dispatcher ──────────────────────────────────────────────────────

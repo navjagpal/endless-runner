@@ -44,8 +44,17 @@ export interface ChunkStyleOptions {
    * surface just makes it look dirty.
    */
   plainMaterials: Set<Material>
+  /**
+   * Materials whose meshes already carry hand-authored vertex colours —
+   * the ground shoulders, which bake their own height-linked tint. These
+   * still want flat shading, but the generic gradient would overwrite the
+   * very data that makes them interesting.
+   */
+  authoredColorMaterials?: Set<Material>
   /** Flat shading roughly triples vertex count; skip it on the low tier. */
   flatShade: boolean
+  /** Override the gradient range. Vehicles want a shallower ramp than foliage. */
+  gradient?: { bottom: number; top: number }
 }
 
 export interface ChunkStyleStats {
@@ -58,6 +67,14 @@ export function styleChunk(root: Mesh, opts: ChunkStyleOptions): ChunkStyleStats
     (m): m is Mesh => m instanceof Mesh && m.getTotalVertices() > 0,
   )
   const before = children.length
+
+  // MergeMeshes bakes each source's world matrix, but Babylon computes
+  // those lazily at render time — and these meshes were built moments ago
+  // and have never been rendered. Without forcing the computation the
+  // merge bakes stale identity matrices, which silently collapses every
+  // obstacle onto the world origin.
+  root.computeWorldMatrix(true)
+  for (const mesh of children) mesh.computeWorldMatrix(true)
 
   // Group by material — a merged mesh can only carry one.
   const groups = new Map<Material, Mesh[]>()
@@ -76,7 +93,12 @@ export function styleChunk(root: Mesh, opts: ChunkStyleOptions): ChunkStyleStats
     if (!merged) continue
 
     merged.material = mat
-    merged.parent = root
+    // MergeMeshes bakes each source's world matrix into the vertices, so
+    // the result already sits in world space with an identity transform.
+    // setParent (rather than assigning .parent) works out the local
+    // transform that preserves that world position, instead of applying
+    // the root's offset a second time.
+    merged.setParent(root)
     merged.isPickable = false
     after++
 
@@ -86,7 +108,15 @@ export function styleChunk(root: Mesh, opts: ChunkStyleOptions): ChunkStyleStats
     }
 
     if (opts.flatShade) merged.convertToFlatShadedMesh()
-    _bakeHeightGradient(merged)
+
+    if (opts.authoredColorMaterials?.has(mat)) {
+      merged.receiveShadows = true
+      merged.useVertexColors = true
+      continue
+    }
+
+    const g = opts.gradient
+    _bakeHeightGradient(merged, g?.bottom ?? GRADIENT_BOTTOM, g?.top ?? GRADIENT_TOP)
   }
 
   return { before, after }
@@ -97,7 +127,7 @@ export function styleChunk(root: Mesh, opts: ChunkStyleOptions): ChunkStyleStats
  * multiplies albedo by these, so the same material still drives the hue
  * — the ramp only shifts how much light each height receives.
  */
-function _bakeHeightGradient(mesh: Mesh): void {
+function _bakeHeightGradient(mesh: Mesh, bottom: number, top: number): void {
   const positions = mesh.getVerticesData(VertexBuffer.PositionKind)
   if (!positions) return
 
@@ -114,7 +144,7 @@ function _bakeHeightGradient(mesh: Mesh): void {
   const colors = new Float32Array(vertexCount * 4)
   for (let v = 0; v < vertexCount; v++) {
     const t = (positions[v * 3 + 1] - minY) / span
-    const k = GRADIENT_BOTTOM + (GRADIENT_TOP - GRADIENT_BOTTOM) * t
+    const k = bottom + (top - bottom) * t
     colors[v * 4 + 0] = k
     colors[v * 4 + 1] = k
     colors[v * 4 + 2] = k

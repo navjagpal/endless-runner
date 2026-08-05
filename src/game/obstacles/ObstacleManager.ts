@@ -6,12 +6,18 @@ import {
   Color3,
   PBRMaterial,
   StandardMaterial,
+  Material,
 } from '@babylonjs/core'
 import { LANE_POSITIONS } from '../track/TrackChunk'
+import { styleChunk } from '../track/ChunkStyling'
+import { getQualityProfile } from '../core/DeviceTier'
 import { Player } from '../player/Player'
 
 const SPAWN_AHEAD    = 65
 const DESPAWN_BEHIND = 22
+
+/** Report the obstacle merge ratio once rather than on every spawn. */
+let _loggedObstacleStats = false
 const PLAYER_HALF    = 0.38   // half player body size added to each collision side
 
 // Roof heights, shared between a vehicle's solid `top` and its ramp's `topY`.
@@ -152,6 +158,20 @@ function _emissive(scene: Scene, color: Color3): StandardMaterial {
   return m
 }
 
+/**
+ * Headlights, taillights, warning lamps and the coin glow.
+ *
+ * These ignore scene lighting entirely, so a vertical gradient would only
+ * dim them unevenly — a taillight that fades toward its base stops
+ * reading as a light.
+ */
+function _emissiveMaterials(): Set<Material> {
+  const out = new Set<Material>()
+  for (const [key, mat] of _matCache) if (key.startsWith('e:')) out.add(mat)
+  out.add(coinGlowMat)
+  return out
+}
+
 // ─── Obstacle Manager ─────────────────────────────────────────────────────────
 
 export class ObstacleManager {
@@ -213,6 +233,27 @@ export class ObstacleManager {
         this._spawnRooftopCoins(obs.surface!)
         extraGap = 6
       }
+    }
+
+    // Same treatment the track props get: collapse to one mesh per
+    // material, split the normals, bake a vertical light ramp. A car is
+    // ~15 primitives and there are a dozen obstacles live at any time, so
+    // this is worth as much here as it is on the scenery.
+    //
+    // The gradient is shallower than the foliage's. Vehicles are read as
+    // solid manufactured objects and a strong ramp makes them look like
+    // they're dissolving into the road; the props can take a heavier one
+    // because foliage genuinely is darker underneath.
+    const stats = styleChunk(obs.mesh, {
+      plainMaterials: _emissiveMaterials(),
+      flatShade: getQualityProfile().flatShade,
+      gradient: { bottom: 0.80, top: 1.08 },
+    })
+    if (!_loggedObstacleStats) {
+      _loggedObstacleStats = true
+      console.info(
+        `[obstacle] ${obs.mesh.name}: ${stats.before} meshes merged into ${stats.after}`,
+      )
     }
 
     this.obstacles.push(obs)
