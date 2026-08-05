@@ -40,6 +40,16 @@ export interface QualityProfile {
   particleScale: number
   /** Camera far plane — shorter draws less. */
   maxZ: number
+  /**
+   * Split prop normals so low-poly facets catch light individually.
+   *
+   * On for every tier, including low. It roughly triples vertex count,
+   * but the props total only a few thousand triangles a chunk — draw
+   * calls are what hurt these GPUs, not vertices — and this is the
+   * single largest visual return in the renderer. Kept as a flag so it
+   * can be turned off if a real device says otherwise.
+   */
+  flatShade: boolean
   /** Human-readable reason the tier was chosen, for the debug overlay. */
   reason: string
 }
@@ -58,6 +68,7 @@ const PROFILES: Record<Tier, Omit<QualityProfile, 'tier' | 'reason'>> = {
     fxaa: true,
     particleScale: 0.4,
     maxZ: 220,
+    flatShade: true,
   },
   mid: {
     hardwareScaling: 1.0,
@@ -72,6 +83,7 @@ const PROFILES: Record<Tier, Omit<QualityProfile, 'tier' | 'reason'>> = {
     fxaa: true,
     particleScale: 0.8,
     maxZ: 300,
+    flatShade: true,
   },
   high: {
     hardwareScaling: 1.0,
@@ -86,6 +98,7 @@ const PROFILES: Record<Tier, Omit<QualityProfile, 'tier' | 'reason'>> = {
     fxaa: true,
     particleScale: 1.0,
     maxZ: 350,
+    flatShade: true,
   },
 }
 

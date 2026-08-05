@@ -4,12 +4,18 @@ import {
   MeshBuilder,
   StandardMaterial,
   PBRMaterial,
+  Material,
   Color3,
   Vector3,
 } from '@babylonjs/core'
+import { styleChunk } from './ChunkStyling'
+import { getQualityProfile } from '../core/DeviceTier'
 
 export const LANE_POSITIONS = [-2.5, 0, 2.5]
 export const CHUNK_LENGTH   = 30
+
+/** Report the merge ratio once per session rather than every 30 metres. */
+let _loggedStyleStats = false
 
 export interface ChunkData { root: Mesh; zStart: number; zEnd: number }
 
@@ -63,6 +69,20 @@ function initShared(scene: Scene): void {
   glowMat                 = new StandardMaterial('glow', scene)
   glowMat.emissiveColor   = new Color3(1.0, 0.92, 0.60)
   glowMat.disableLighting = true
+}
+
+/**
+ * Surfaces that should be merged but not flat-shaded or gradiented.
+ *
+ * Ground planes gain nothing from split normals, and a vertical gradient
+ * across a road reads as grime rather than as light. The emissive
+ * materials ignore lighting entirely, so a gradient would just dim them
+ * unevenly.
+ */
+function _plainMaterials(): Set<Material> {
+  return new Set<Material>([
+    sharedRoadMat, sharedGrassMat, curbMat, dashMat, glowMat,
+  ])
 }
 
 // ─── Chunk factory ────────────────────────────────────────────────────────────
@@ -126,6 +146,21 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
       const lz = zStart + 5 + i * 15
       for (const side of [-1, 1]) _addLamp(scene, root, side * 5.5, lz)
     }
+  }
+
+  // Collapse the chunk's ~100 loose meshes into one per material, then
+  // flat-shade and gradient the props. Everything above this point is
+  // static, so nothing is lost by baking it down.
+  const stats = styleChunk(root, {
+    plainMaterials: _plainMaterials(),
+    flatShade: getQualityProfile().flatShade,
+  })
+  if (!_loggedStyleStats) {
+    _loggedStyleStats = true
+    console.info(
+      `[chunk] ${stats.before} meshes merged into ${stats.after} ` +
+      `(${(stats.before / Math.max(1, stats.after)).toFixed(1)}x fewer draw calls per chunk)`,
+    )
   }
 
   return { root, zStart, zEnd: zStart + CHUNK_LENGTH }
@@ -338,27 +373,51 @@ function _addSpaceProps(scene: Scene, root: Mesh, zStart: number, _spacing: numb
 
 // ─── Shared prop builders ─────────────────────────────────────────────────────
 
+// Silhouette variance.
+//
+// Every tree used to be built at exactly one size and orientation, so a
+// row of them read as the same asset stamped repeatedly — the strongest
+// "this is placeholder" tell there is. Scale and yaw cost nothing.
+//
+// Yaw is only worth applying because of flat shading: a smooth-shaded
+// cone is rotationally symmetric and turning it changes nothing, but a
+// faceted one presents different edges to the light.
+
 function _addRoundTree(scene: Scene, parent: Mesh, x: number, z: number, leafMat: PBRMaterial): void {
-  const trunk = MeshBuilder.CreateCylinder('tr', { height: 1.5, diameter: 0.28, tessellation: 7 }, scene)
-  trunk.position = new Vector3(x, 0.75, z); trunk.material = trunkMat; trunk.receiveShadows = true; trunk.parent = parent
+  const s    = 0.82 + Math.random() * 0.46
+  const yaw  = Math.random() * Math.PI * 2
 
-  const low = MeshBuilder.CreateCylinder('tl0', { height: 1.7, diameterTop: 0, diameterBottom: 2.2, tessellation: 8 }, scene)
-  low.position = new Vector3(x, 2.1, z); low.material = leafMat; low.receiveShadows = true; low.parent = parent
+  const trunk = MeshBuilder.CreateCylinder('tr', { height: 1.5 * s, diameter: 0.28 * s, tessellation: 7 }, scene)
+  trunk.position = new Vector3(x, 0.75 * s, z); trunk.rotation.y = yaw
+  trunk.material = trunkMat; trunk.receiveShadows = true; trunk.parent = parent
 
-  const high = MeshBuilder.CreateCylinder('tl1', { height: 1.3, diameterTop: 0, diameterBottom: 1.5, tessellation: 8 }, scene)
-  high.position = new Vector3(x, 3.05, z); high.material = leafMat; high.parent = parent
+  const low = MeshBuilder.CreateCylinder('tl0', { height: 1.7 * s, diameterTop: 0, diameterBottom: 2.2 * s, tessellation: 8 }, scene)
+  low.position = new Vector3(x, 2.1 * s, z); low.rotation.y = yaw
+  low.material = leafMat; low.receiveShadows = true; low.parent = parent
+
+  const high = MeshBuilder.CreateCylinder('tl1', { height: 1.3 * s, diameterTop: 0, diameterBottom: 1.5 * s, tessellation: 8 }, scene)
+  high.position = new Vector3(x, 3.05 * s, z); high.rotation.y = yaw + 0.4
+  high.material = leafMat; high.parent = parent
 }
 
 function _addPineTree(scene: Scene, parent: Mesh, x: number, z: number, leafMat: PBRMaterial): void {
   const height = 3.5 + Math.random() * 2
-  const trunk  = MeshBuilder.CreateCylinder('pt', { height: 1.0, diameter: 0.22, tessellation: 6 }, scene)
-  trunk.position = new Vector3(x, 0.5, z); trunk.material = trunkMat; trunk.parent = parent
+  const s      = 0.85 + Math.random() * 0.40
+  const yaw    = Math.random() * Math.PI * 2
+
+  const trunk  = MeshBuilder.CreateCylinder('pt', { height: 1.0 * s, diameter: 0.22 * s, tessellation: 6 }, scene)
+  trunk.position = new Vector3(x, 0.5 * s, z); trunk.rotation.y = yaw
+  trunk.material = trunkMat; trunk.parent = parent
 
   for (let tier = 0; tier < 4; tier++) {
-    const tierH  = height * (0.45 + tier * 0.12)
-    const diam   = 2.4 - tier * 0.44
+    const tierH  = height * (0.45 + tier * 0.12) * s
+    const diam   = (2.4 - tier * 0.44) * s
     const cone   = MeshBuilder.CreateCylinder(`pc${tier}`, { height: diam * 0.9, diameterTop: 0, diameterBottom: diam, tessellation: 7 }, scene)
-    cone.position = new Vector3(x, tierH, z); cone.material = leafMat; cone.parent = parent
+    cone.position = new Vector3(x, tierH, z)
+    // Stagger the yaw per tier so the facets don't line up into a seam
+    // running down the tree.
+    cone.rotation.y = yaw + tier * 0.55
+    cone.material = leafMat; cone.parent = parent
   }
 }
 
