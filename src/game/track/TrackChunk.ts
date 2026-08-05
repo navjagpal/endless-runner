@@ -96,11 +96,7 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
   const isSpace = zoneId === 'space'
 
   // ── Road ──
-  const road = MeshBuilder.CreateBox('road', { width: 9, height: 0.20, depth: CHUNK_LENGTH }, scene)
-  road.position = new Vector3(0, -0.10, zMid)
-  road.material = sharedRoadMat
-  road.receiveShadows = true
-  road.parent = root
+  _addRoadSurface(scene, root, zStart, zMid)
 
   // ── Grass / ground shoulders ──
   for (const side of [-1, 1]) _addGroundShoulder(scene, root, side, zStart, zMid)
@@ -160,6 +156,108 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
   }
 
   return { root, zStart, zEnd: zStart + CHUNK_LENGTH }
+}
+
+/** Writes a flat greyscale vertex colour so a mesh can merge with tinted ones. */
+function _fillVertexColors(mesh: Mesh, tint: number): void {
+  const positions = mesh.getVerticesData(VertexBuffer.PositionKind)
+  if (!positions) return
+  const count = positions.length / 3
+  const colors = new Float32Array(count * 4)
+  for (let v = 0; v < count; v++) {
+    colors[v * 4] = colors[v * 4 + 1] = colors[v * 4 + 2] = tint
+    colors[v * 4 + 3] = 1
+  }
+  mesh.setVerticesData(VertexBuffer.ColorKind, colors, false)
+  mesh.useVertexColors = true
+}
+
+/**
+ * The driving surface.
+ *
+ * This was a single untextured box — nine metres of perfectly uniform
+ * grey, and after the verge got form it became the last big dead area on
+ * screen. It's a flat plane, so like the verge it can't be helped by a
+ * vertical gradient, but unlike the verge it must NOT get geometry:
+ * anything that breaks the surface would fight the player's read of
+ * three flat lanes at speed.
+ *
+ * So the detail is entirely in vertex colour, and deliberately restrained.
+ * Three components, none of them individually obvious:
+ *
+ *   Transverse joints every 6 m. These do the most work, and not for
+ *   looks — regularly spaced marks streaming under the player are a
+ *   strong speed cue, which a runner wants and which a blank surface
+ *   gives up for free.
+ *
+ *   Grime toward the kerbs, since the middle of a road is polished by
+ *   traffic and the edges aren't. It also frames the playable width.
+ *
+ *   A low-amplitude mottle so no two square metres match exactly.
+ *
+ * Sampled in world space so joints line up across chunk seams instead of
+ * restarting every 30 m. Kept out of the flat-shading and gradient passes
+ * (see `_plainMaterials`) — split normals do nothing to a flat plane, and
+ * the generic gradient would overwrite exactly this data.
+ */
+function _addRoadSurface(scene: Scene, root: Mesh, zStart: number, zMid: number): void {
+  const WIDTH = 9
+  const SUBDIV_Z = 48
+  // Joints are painted per-vertex, so they can only land where there is a
+  // vertex row. Spacing must therefore be a whole number of rows —
+  // otherwise each joint falls between rows and gets smeared across one or
+  // two of them depending on where it happens to land, so some read thin
+  // and some thick. Deriving it from the row pitch makes that impossible.
+  const ROW_PITCH = CHUNK_LENGTH / SUBDIV_Z
+  const JOINT_SPACING = ROW_PITCH * 10
+
+  // The slab underneath is kept. Only its top face is ever seen, but it
+  // gives the road edge real thickness where it meets the verge, and the
+  // detailed surface below is a plane with no underside. Its vertex
+  // colours are written uniformly so it can merge with the surface —
+  // merging a mesh that has a colour buffer with one that doesn't
+  // produces garbage.
+  const base = MeshBuilder.CreateBox('roadBase', { width: WIDTH, height: 0.20, depth: CHUNK_LENGTH }, scene)
+  base.position = new Vector3(0, -0.10, zMid)
+  base.material = sharedRoadMat
+  base.receiveShadows = true
+  base.parent = root
+  _fillVertexColors(base, 0.86)
+
+  const road = MeshBuilder.CreateGround('road', {
+    width: WIDTH, height: CHUNK_LENGTH, subdivisionsX: 12, subdivisionsY: SUBDIV_Z,
+  }, scene)
+  // A hair above the slab so the two don't z-fight.
+  road.position = new Vector3(0, 0.002, zMid)
+
+  const positions = road.getVerticesData(VertexBuffer.PositionKind)
+  if (positions) {
+    const colors = new Float32Array((positions.length / 3) * 4)
+    for (let i = 0, c = 0; i < positions.length; i += 3, c += 4) {
+      const x = positions[i]
+      const worldZ = zStart + CHUNK_LENGTH / 2 + positions[i + 2]
+
+      // Distance in metres to the nearest expansion joint.
+      const phase = worldZ / JOINT_SPACING
+      const toJoint = Math.abs(phase - Math.round(phase)) * JOINT_SPACING
+      const joint = Math.max(0, 1 - toJoint / 0.40) * 0.13
+
+      // Grime ramps in over the outer 1.3 m of the 4.5 m half-width.
+      const edge = Math.max(0, (Math.abs(x) - 3.2) / 1.3) * 0.10
+
+      const mottle = Math.sin(worldZ * 0.9) * Math.cos(x * 1.7) * 0.022
+
+      const tint = Math.max(0.5, 1 - joint - edge + mottle)
+      colors[c] = colors[c + 1] = colors[c + 2] = tint
+      colors[c + 3] = 1
+    }
+    road.setVerticesData(VertexBuffer.ColorKind, colors, false)
+    road.useVertexColors = true
+  }
+
+  road.material = sharedRoadMat
+  road.receiveShadows = true
+  road.parent = root
 }
 
 /**
