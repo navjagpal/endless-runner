@@ -146,6 +146,93 @@ for (const obs of OBSTACLES.filter(o => o.top === TRUCK_ROOF || o.top === BUS_RO
        : pass(`${obs.name}: feet at ${obs.top} clear`)
 }
 
+// ─── Ramp traversal ──────────────────────────────────────────────────────────
+//
+// The static checks above can't catch the case the merge actually put at
+// risk: running up a ramped vehicle. That's a dynamic interaction between
+// _groundUnderPlayer (which lifts groundY along the slope) and
+// _updateVertical (which sticks the player to it), with the collision test
+// firing every frame throughout. Simulate the whole approach → ramp →
+// rooftop → fall-off sequence and assert it never bumps.
+
+console.log('\nramp traversal (approach → ramp → rooftop → fall off the front):')
+
+// Geometry from _makeTruck's ramped branch.
+const TRUCK_Z = 40
+const RAMP_LENGTH = 3.6
+const RAMP_LOCAL_Z = -2.40
+const TOP_FRONT_LZ = 0.50
+const surface = {
+  rampStartZ: TRUCK_Z + RAMP_LOCAL_Z - RAMP_LENGTH,
+  rampEndZ:   TRUCK_Z + RAMP_LOCAL_Z,
+  topEndZ:    TRUCK_Z + TOP_FRONT_LZ,
+  topY:       TRUCK_ROOF,
+}
+const truck = { name: 'truck', bottom: 0, top: TRUCK_ROOF, collD: 2.00, z: TRUCK_Z }
+
+/** Mirrors ObstacleManager._groundUnderPlayer for a single surface. */
+function groundUnder(pz) {
+  if (pz >= surface.rampStartZ && pz <= surface.rampEndZ) {
+    return ((pz - surface.rampStartZ) / (surface.rampEndZ - surface.rampStartZ)) * surface.topY
+  }
+  if (pz > surface.rampEndZ && pz <= surface.topEndZ) return surface.topY
+  return 0
+}
+
+// Matches ObstacleManager's grace window: after stepping off a vehicle,
+// collision with it stays suppressed briefly. Dropping off the front of the
+// rooftop puts the player inside the cab's solid span on the way down, so
+// without this the landing always registers as a bump.
+const ON_GRACE_SECS = 0.6
+
+function simulateRamp(speed) {
+  let pz = TRUCK_Z - 15, posY = 0, velY = 0, state = 'running'
+  let maxY = 0, bumped = false, reachedRoof = false, fellBack = false
+  let graceTimer = 0
+
+  for (let i = 0; i < 3000 && pz < TRUCK_Z + 20; i++) {
+    pz += speed * DT
+    const groundY = groundUnder(pz)
+    const onThis = groundY > 0
+
+    // Player._updateVertical
+    const airborne = state === 'jumping' || posY > groundY + 0.02
+    if (airborne) {
+      velY -= G * (velY < 0 ? FALL_MULTIPLIER : 1) * DT
+      posY += velY * DT
+      if (posY <= groundY && velY <= 0) { posY = groundY; velY = 0; state = 'running' }
+    } else {
+      posY = groundY; velY = 0
+    }
+    maxY = Math.max(maxY, posY)
+    if (posY >= surface.topY - 0.01) reachedRoof = true
+    if (reachedRoof && posY <= 0.01) fellBack = true
+
+    // ObstacleManager collision, including the post-dismount grace window.
+    if (onThis) graceTimer = ON_GRACE_SECS
+    else if (graceTimer > 0) graceTimer -= DT
+
+    const suppressed = onThis || graceTimer > 0
+    if (!suppressed) {
+      const dz = Math.abs(pz - truck.z)
+      const vertical = posY < truck.top && posY + STAND_HEIGHT > truck.bottom
+      if (dz < truck.collD + PLAYER_HALF && vertical) bumped = true
+    }
+  }
+  return { maxY, bumped, reachedRoof, fellBack }
+}
+
+for (const speed of SPEEDS) {
+  const r = simulateRamp(speed)
+  const problems = []
+  if (r.bumped) problems.push('collided while traversing')
+  if (!r.reachedRoof) problems.push(`never reached roof (peak ${r.maxY.toFixed(2)})`)
+  if (!r.fellBack) problems.push('never came back down off the front')
+  problems.length
+    ? fail(`speed ${speed}: ${problems.join('; ')}`)
+    : pass(`speed ${speed}: rides to ${r.maxY.toFixed(2)} and drops off cleanly, no bump`)
+}
+
 console.log()
 if (failures) {
   console.log(`${failures} check(s) failed — the vertical model is inconsistent.`)
