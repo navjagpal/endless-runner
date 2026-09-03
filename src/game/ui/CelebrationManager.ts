@@ -21,13 +21,9 @@ interface Milestone {
 const MILESTONES: Milestone[] = [
   { dist:  100, text: 'Nice!',       sub: '100 metres',  emoji: '🌟', big: false },
   { dist:  250, text: 'Amazing!',    sub: '250 metres',  emoji: '⭐', big: false },
-  { dist:  500, text: 'New World!',  sub: 'Forest',      emoji: '🌲', big: true  },
   { dist:  750, text: 'Superstar!',  sub: '750 metres',  emoji: '💫', big: false },
-  { dist: 1000, text: 'New World!',  sub: 'City',        emoji: '🏙️', big: true  },
   { dist: 1250, text: 'Incredible!', sub: '1250 metres', emoji: '🎉', big: false },
-  { dist: 1500, text: 'New World!',  sub: 'Beach',       emoji: '🌊', big: true  },
   { dist: 1750, text: 'Legendary!',  sub: '1750 metres', emoji: '🏆', big: false },
-  { dist: 2000, text: 'New World!',  sub: 'Space',       emoji: '🚀', big: true  },
   { dist: 3000, text: 'Cosmic!',     sub: '3000 metres', emoji: '🌌', big: false },
   { dist: 5000, text: 'INFINITE!',   sub: '5000 metres', emoji: '🌈', big: true  },
 ]
@@ -71,6 +67,13 @@ function injectCSS(): void {
       0%,100% { opacity:1; }
       50%     { opacity:0.7; }
     }
+    @keyframes popIn {
+      0%   { opacity:0; transform:translate(-50%,-50%) scale(0.5) rotate(-6deg); }
+      35%  { opacity:1; transform:translate(-50%,-50%) scale(1.15) rotate(2deg); }
+      60%  { transform:translate(-50%,-50%) scale(1) rotate(0deg); }
+      80%  { opacity:1; transform:translate(-50%,-60%) scale(1); }
+      100% { opacity:0; transform:translate(-50%,-90%) scale(0.9); }
+    }
   `
   document.head.appendChild(style)
 }
@@ -81,7 +84,8 @@ export class CelebrationManager {
   private scene: Scene
   private emitter: Mesh
   private psSystems: ParticleSystem[] = []
-  private overlay: HTMLDivElement
+  private popEl: HTMLDivElement
+  private popTimer: ReturnType<typeof setTimeout> | null = null
   private nextMilestoneIdx = 0
   private lastTriggerDist  = -1
 
@@ -89,8 +93,30 @@ export class CelebrationManager {
     this.scene   = scene
     this.emitter = playerMesh
     injectCSS()
-    this.overlay = this._buildOverlay()
+    this.popEl = this._buildPop()
     this.psSystems = this._buildConfettiSystems()
+  }
+
+  /**
+   * Short floating text near the runner — "x2!", "Oops!", "Wheee!".
+   * Cheap, frequent feedback — the only kind of banner this game shows.
+   */
+  pop(text: string, color = '#fff', big = false): void {
+    const el = this.popEl
+    el.textContent = text
+    el.style.color = color
+    el.style.fontSize = big ? 'clamp(1.4rem,5vw,2.6rem)' : 'clamp(1.05rem,3.6vw,1.8rem)'
+    el.style.display = 'block'
+    el.style.animation = 'none'
+    void el.offsetWidth
+    el.style.animation = `popIn ${big ? 1.6 : 1.1}s ease-out forwards`
+    if (this.popTimer) clearTimeout(this.popTimer)
+    this.popTimer = setTimeout(() => { el.style.display = 'none' }, big ? 1600 : 1100)
+  }
+
+  /** Confetti without an overlay. */
+  burst(multiplier = 1.5): void {
+    this._fireConfetti(multiplier)
   }
 
   // Call every frame
@@ -104,90 +130,32 @@ export class CelebrationManager {
     }
   }
 
-  // Also callable from Game.ts when zone changes
+  /**
+   * Zone change. This used to raise the big centre overlay; a child mid-
+   * dodge doesn't want a banner over the road, so it is now the same
+   * small pop as everything else plus a little confetti.
+   */
   celebrateZone(zone: ZoneConfig): void {
-    const m: Milestone = {
-      dist: 0, text: 'New World!', sub: zone.label,
-      emoji: zone.emoji, big: true,
-    }
-    this._trigger(m)
+    this.pop(`${zone.emoji} ${zone.label}!`, '#fff')
+    this._fireConfetti(1)
   }
 
   // ─── Private ──────────────────────────────────────────────────────────────
 
   private _trigger(m: Milestone): void {
-    this._showOverlay(m)
-    this._fireConfetti(m.big ? 2 : 1)
+    this.pop(`${m.emoji} ${m.text}`, '#ffe45c')
+    if (m.big) this._fireConfetti(1)
   }
 
-  private _showOverlay(m: Milestone): void {
-    const el = this.overlay
-    const emojiEl  = el.querySelector<HTMLDivElement>('.cel-emoji')!
-    const textEl   = el.querySelector<HTMLDivElement>('.cel-text')!
-    const subEl    = el.querySelector<HTMLDivElement>('.cel-sub')!
-
-    emojiEl.textContent = m.emoji
-    textEl.textContent  = m.text
-    subEl.textContent   = m.sub
-
-    const holdMs = m.big ? 2800 : 1800
-    const bgGrad = m.big
-      ? 'linear-gradient(135deg,rgba(30,10,70,0.88),rgba(80,20,120,0.88))'
-      : 'linear-gradient(135deg,rgba(10,30,70,0.82),rgba(20,60,100,0.82))'
-
-    el.style.background = bgGrad
-    textEl.style.fontSize = m.big ? 'clamp(2rem,8vw,4.5rem)' : 'clamp(1.5rem,5vw,2.8rem)'
-
-    el.style.display    = 'flex'
-    el.style.animation  = 'celebIn 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards'
-
-    const hideTimer = setTimeout(() => {
-      el.style.animation = 'celebOut 0.4s ease-in forwards'
-      setTimeout(() => { el.style.display = 'none' }, 400)
-    }, holdMs)
-
-    // Cancel if another celebration fires soon
-    ;(el as HTMLDivElement & { _hideTimer?: ReturnType<typeof setTimeout> })._hideTimer &&
-      clearTimeout((el as HTMLDivElement & { _hideTimer?: ReturnType<typeof setTimeout> })._hideTimer)
-    ;(el as HTMLDivElement & { _hideTimer?: ReturnType<typeof setTimeout> })._hideTimer = hideTimer
-  }
-
-  private _buildOverlay(): HTMLDivElement {
+  private _buildPop(): HTMLDivElement {
     const el = document.createElement('div')
     el.style.cssText = `
-      display:none; position:fixed;
-      top:42%; left:50%; transform:translate(-50%,-50%);
-      flex-direction:column; align-items:center; gap:6px;
-      padding:24px 48px 20px;
-      border-radius:24px;
-      border:1px solid rgba(255,255,255,0.2);
-      backdrop-filter:blur(12px);
-      pointer-events:none; z-index:100;
-      text-align:center;
-      font-family:'Nunito','Arial Rounded MT Bold',Arial,sans-serif;
-      box-shadow:0 8px 48px rgba(0,0,0,0.5);
-    `
-
-    const emoji = document.createElement('div')
-    emoji.className = 'cel-emoji'
-    emoji.style.cssText = 'font-size:clamp(2.5rem,10vw,5rem);animation:emojiPop 0.6s ease forwards;'
-
-    const text = document.createElement('div')
-    text.className = 'cel-text'
-    text.style.cssText = `
-      font-weight:900; color:#fff;
-      text-shadow:0 2px 12px rgba(0,0,0,0.6);
+      display:none; position:fixed; top:66%; left:50%; transform:translate(-50%,-50%);
+      font-family:'Nunito','Fredoka','Arial Rounded MT Bold',Arial,sans-serif;
+      font-weight:900; white-space:nowrap; pointer-events:none; z-index:90;
+      text-shadow:0 3px 0 rgba(0,0,0,0.25), 0 6px 18px rgba(0,0,0,0.45);
       letter-spacing:-0.5px;
-      animation:shimmer 1.2s ease-in-out infinite;
     `
-
-    const sub = document.createElement('div')
-    sub.className = 'cel-sub'
-    sub.style.cssText = 'color:rgba(255,255,255,0.75); font-size:clamp(0.9rem,3vw,1.3rem); font-weight:600;'
-
-    el.appendChild(emoji)
-    el.appendChild(text)
-    el.appendChild(sub)
     document.body.appendChild(el)
     return el
   }

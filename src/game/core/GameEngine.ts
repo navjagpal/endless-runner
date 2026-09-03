@@ -61,7 +61,7 @@ export class GameEngine {
     this.engine.setHardwareScalingLevel(this._scaling)
 
     this.scene = new Scene(this.engine)
-    this.scene.clearColor = new Color4(0.55, 0.78, 0.95, 1)
+    this.scene.clearColor = new Color4(0.80, 0.92, 1.0, 1)
 
     ;({ sunLight: this.sunLight, hemiLight: this.hemiLight, shadowGenerator: this.shadowGenerator } =
       this._setupLighting())

@@ -40,9 +40,9 @@ export function setupPostProcessing(
 
   // ── Bloom — coin glints, lamp glow, celebration bursts ──────────────
   pipeline.bloomEnabled   = quality.bloom
-  pipeline.bloomThreshold = 0.72   // was 0.50, which bloomed ordinary
+  pipeline.bloomThreshold = 0.68   // was 0.50, which bloomed ordinary
                                    // mid-tones and washed the image out
-  pipeline.bloomWeight    = 0.45
+  pipeline.bloomWeight    = 0.55
   pipeline.bloomKernel    = quality.bloomKernel
   pipeline.bloomScale     = 0.5
 

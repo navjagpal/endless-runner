@@ -41,11 +41,11 @@ makes Subway Surfers feel exciting.
 
 ## ⚡ 3. Power-ups
 
-- [ ] **Coin magnet** — Auto-pulls nearby coins for ~8 seconds.
+- [x] **Coin magnet** — Pickup on the track; pulls coins in for 9 seconds.
 - [ ] **Jetpack** — Flies above obstacles along a trail of coins.
-- [ ] **2× coin multiplier** — Coins briefly sparkle and count double.
+- [x] **Coin multiplier** — x2/x3/x4 for a clean coin streak, reset on a bump.
 - [ ] **Hoverboard / scooter** — Absorbs one collision before breaking.
-- [ ] **Rainbow star** — Short invincibility, plow through obstacles.
+- [x] **Rainbow star** — Star Power: fill the ⭐ meter with dodges; ~7 s invincible + magnet + rainbow trail.
 
 ## 🌟 4. Collectibles Beyond Coins
 
@@ -60,27 +60,27 @@ makes Subway Surfers feel exciting.
 - [ ] **Weather events** — Rainbow after rain, snowflakes, cherry blossoms.
 - [ ] **Candy-land biome** — Lollipops, gingerbread road, marshmallow clouds.
 - [ ] **Underwater biome** — Soft blue filter, bubbles, fish.
-- [ ] **Animated billboards** — Cartoon faces that wave at the player.
+- [~] **Animated billboards** — City billboards have smiley faces (static).
 - [ ] **Cozy night cycle** — Replace scary space with moon + twinkly stars.
 
 ## 🎵 6. Audio & Juice
 
-- [ ] **Voice callouts** — "Wheee!", "Yay!", "Woohoo!" on big jumps.
-- [ ] **Combo chime escalation** — Pitch climbs with consecutive coin pickups.
+- [x] **Callouts** — "Wheee!" on rooftops, "x2 coins!", "N in a row!", "Oops!" text pops (text, not voice).
+- [x] **Combo chime escalation** — Coin chime pitch climbs with the streak.
 - [ ] **Milestone celebrations** — Confetti + chime every 100 coins / 500 m.
-- [ ] **Softer collision sound** — Gentle "boing" instead of harsh buzz.
+- [x] **Softer collision sound** — Gentle "boing" instead of harsh buzz.
 
 ## 🎯 7. Progression & Rewards
 
 - [ ] **Missions / stickers** — "Jump 5 buses!" → sticker in a scrapbook.
 - [ ] **Daily login gift** — Coin bonus or outfit piece per day.
-- [ ] **High score celebration** — Fireworks + "New Best!" banner.
-- [ ] **Lower kids-mode speed cap** — Max ~18 m/s instead of 28.
-- [ ] **No-fail option** — Bumps slow the player, never force restart.
+- [x] **High score celebration** — Confetti + "New Best!" pop; best persists.
+- [x] **Lower kids-mode speed cap** — Kid Mode caps at 17 m/s with a slow ramp.
+- [x] **No-fail option** — Bumps slow the player and spill a few coins, never force restart.
 
 ## 🕹️ 8. Controls
 
-- [ ] **Bigger visible tap zones** — On-screen direction buttons.
+- [x] **Bigger visible tap zones** — On-screen direction buttons (auto on touch devices).
 - [ ] **Assisted mode** — Auto-jump obvious obstacles so she can focus on coins.
 
 ---
