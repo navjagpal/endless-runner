@@ -1,31 +1,19 @@
 # Character model
 
-`runner.glb` — from the **Animated Men Pack** by [Quaternius](https://quaternius.com/).
+`runner.glb` — **character-female-b** from the **Mini Characters** pack by
+[Kenney](https://kenney.nl/assets/mini-characters), built by
+`scripts/build-kits.mjs`.
 
-- Source: https://poly.pizza/bundle/Animated-Men-Pack-DAC9SDgMQT
 - License: **CC0 1.0 Universal (Public Domain)** — no attribution required,
-  free for personal and commercial use. Credited here anyway, because
-  knowing where an asset came from is worth more than the licence
-  technically demands.
-- Rig: 31 joints, single skinned mesh, no textures (vertex/material
-  colours only — which is why it drops straight into the game's flat
-  stylized palette without an atlas).
-- Clips: `Clapping`, `Death`, `Idle`, `Jump`, `Punch`, `Run`,
-  `RunningJump`, `Sitting`, `Standing`, `SwordSlash`, `Walk`.
+  free for personal and commercial use. Credited here anyway.
+- Rig: skinned chibi, one colormap texture, ~144 KB.
+- Clips used: `sprint` → running, `jump` → jumping, `crouch` → sliding.
+  There is no stumble clip, so the bump reaction is procedural (flash,
+  particles, hit-stop) over the run cycle.
 
-The game binds `Run` → running and `RunningJump` → jumping. It has no
-slide or stumble clip, so those two states are synthesized procedurally
-(see `_applyProceduralLayer` in `src/game/player/CharacterRig.ts`).
+Other characters in the same pack (female-a…f, male-a…f) drop in by
+changing `HERO` in the build script; so does any `character-*` from the
+rigid Blocky Characters pack. The previous runner (Quaternius' Animated
+Men Pack, also CC0) is in git history.
 
-## Swapping the character
-
-Drop any rigged GLB in as `runner.glb` — clips are matched by keyword,
-scale is normalized automatically, and missing states fall back to
-procedural motion. Other characters worth knowing about:
-
-- The other three men in the same pack (suit, long sleeves, hoodie),
-  same rig and same clips.
-- [Animated Woman](https://poly.pizza/m/nIItLV9nxS) (also Quaternius,
-  CC0) has a different trade-off: it *does* have `Roll` and
-  `HitRecieve`, which bind to the slide and stumble states, but it has
-  **no jump clip**, so jumping would be procedural instead.
+The scenery and vehicle kits are documented in `kits/CREDITS.md`.

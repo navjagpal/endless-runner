@@ -14,6 +14,7 @@ import { LANE_POSITIONS } from '../track/TrackChunk'
 import { styleChunk } from '../track/ChunkStyling'
 import { getQualityProfile } from '../core/DeviceTier'
 import { getCoinTexture } from '../fx/Textures'
+import { Kits } from '../assets/Kits'
 import { Player } from '../player/Player'
 
 const SPAWN_AHEAD    = 70
@@ -36,6 +37,17 @@ const GANTRY_CLEARANCE = 1.35
 
 // Coin hover height above whatever surface it belongs to.
 const COIN_Y = 1.10
+
+// Kit vehicles. Cars are scaled so no roof rises above CAR_ROOF (the
+// jumpable ceiling); trucks are scaled to exactly TRUCK_ROOF so the ramp
+// deposits the player on the real roof. Only the box truck gets a ramp:
+// the fire truck's ladder and the ambulance's light bar aren't runnable.
+const CAR_MODELS   = ['sedan', 'sedan-sports', 'hatchback-sports', 'suv', 'taxi', 'police', 'van', 'race']
+const TRUCK_MODELS = ['delivery', 'firetruck', 'ambulance']
+const RAMP_TRUCK   = 'delivery'
+// The kit vehicles arrive facing the camera; turned round so the traffic
+// drives away from the player and shows its tail lights.
+const VEHICLE_YAW  = Math.PI
 
 // Magnet: how far coins get pulled from, and how fast they fly in.
 const MAGNET_REACH_X = 6.5
@@ -278,6 +290,7 @@ export class ObstacleManager {
     // material, split the normals, bake a vertical light ramp.
     const stats = styleChunk(obs.mesh, {
       plainMaterials: _emissiveMaterials(),
+      preShadedMaterials: Kits.materials,
       flatShade: getQualityProfile().flatShade,
       gradient: { bottom: 0.80, top: 1.08 },
     })
@@ -400,6 +413,14 @@ export class ObstacleManager {
     const root     = new Mesh('car', this.scene)
     root.position  = new Vector3(x, 0, z)
 
+    if (Kits.isLoaded('vehicles')) {
+      const model = CAR_MODELS[Math.floor(Math.random() * CAR_MODELS.length)]
+      const size  = Kits.size(model)!
+      const scale = Math.min(1.25, CAR_ROOF / size.y)
+      Kits.place(root, model, 0, 0, 0, scale, VEHICLE_YAW)
+      return { mesh: root, collW: 0.84, collD: 1.55, bottom: 0, top: CAR_ROOF, lanes: [lane], passed: false, bumped: false }
+    }
+
     const bodyColor = CAR_BODY_COLORS[Math.floor(Math.random() * CAR_BODY_COLORS.length)]
     const bodyMat   = _pbr(this.scene, bodyColor, 0.10, 0.40)
     const bumpMat   = _pbr(this.scene, new Color3(0.10, 0.10, 0.12), 0.05, 0.80)
@@ -464,6 +485,30 @@ export class ObstacleManager {
   private _makeTruck(z: number, x: number, lane: number, ramped = false): Obstacle {
     const root    = new Mesh('truck', this.scene)
     root.position = new Vector3(x, 0, z)
+
+    if (Kits.isLoaded('vehicles')) {
+      const model  = ramped ? RAMP_TRUCK : TRUCK_MODELS[Math.floor(Math.random() * TRUCK_MODELS.length)]
+      const size   = Kits.size(model)!
+      const scale  = TRUCK_ROOF / size.y
+      const placed = Kits.place(root, model, 0, 0, 0, scale, VEHICLE_YAW)!
+      let surface: Surface | undefined
+      if (ramped) {
+        const rampLength = 3.6
+        const rampLocalZ = -placed.z / 2 + 0.1        // rear bumper
+        const topFrontLZ = placed.z / 2 - 1.5         // where the cargo box meets the cab
+        const widthX     = placed.x
+        this._addRamp(root, 0, rampLocalZ, rampLength, TRUCK_ROOF, widthX)
+        surface = {
+          rampStartZ: z + rampLocalZ - rampLength,
+          rampEndZ:   z + rampLocalZ,
+          topEndZ:    z + topFrontLZ,
+          xMin:       x - widthX / 2,
+          xMax:       x + widthX / 2,
+          topY:       TRUCK_ROOF,
+        }
+      }
+      return { mesh: root, collW: 0.94, collD: 2.00, bottom: 0, top: TRUCK_ROOF, surface, lanes: [lane], passed: false, bumped: false }
+    }
 
     const cabColor = TRUCK_CAB_COLORS[Math.floor(Math.random() * TRUCK_CAB_COLORS.length)]
     const cabMat   = _pbr(this.scene, cabColor, 0.08, 0.50)

@@ -4,8 +4,10 @@ import {
   Color3,
   AnimationGroup,
   AbstractMesh,
+  Mesh,
   PBRMaterial,
   StandardMaterial,
+  VertexBuffer,
   LoadAssetContainerAsync,
 } from '@babylonjs/core'
 import type { Character, CharacterContext, CharacterState } from './Character'
@@ -60,9 +62,12 @@ const CLIP_KEYWORDS: Record<CharacterState, string[][]> = {
  * substring search happily binds `Run_Shoot` or `Run_Back` to the run
  * state; excluding them is cheaper than making every keyword exact.
  */
-const CLIP_BLOCKLIST = ['shoot', 'gun', 'sword', 'punch', 'kick', 'slash', 'back', 'left', 'right', 'death']
+const CLIP_BLOCKLIST = ['shoot', 'gun', 'sword', 'punch', 'kick', 'slash', 'back', 'left', 'right', 'death', 'wheelchair', 'die', 'sit', 'drive']
 
 const BLEND_SPEED = 8.0     // weight units/sec during a state cross-fade
+
+/** Extra yaw applied to the loaded model so it faces +z (down the track). */
+const HERO_YAW = 0
 
 function _findClip(groups: AnimationGroup[], state: CharacterState): AnimationGroup | null {
   for (const keywords of CLIP_KEYWORDS[state]) {
@@ -102,6 +107,10 @@ export class CharacterRig implements Character {
 
     this.tiltNode = new TransformNode('rigTilt', scene)
     this.tiltNode.parent = this.root
+
+    // glTF has no "forward" convention worth trusting; this is the knob
+    // for a model that arrives facing the camera.
+    this.tiltNode.rotation.y = HERO_YAW
 
     for (const node of container.rootNodes) node.parent = this.tiltNode
     this.meshes = container.meshes
@@ -168,6 +177,20 @@ export class CharacterRig implements Character {
       const file = new File([buffer], 'runner.glb')
       const container = await LoadAssetContainerAsync(file, scene)
       container.addAllToScene()
+
+      // Kenney's characters ship unlit and without normals — fine for a
+      // flat-colour toy render, wrong next to a lit track. Give them
+      // normals and a matte lit material so the sun and zone tint apply.
+      for (const m of container.meshes) {
+        if (m instanceof Mesh && m.getTotalVertices() > 0 && !m.isVerticesDataPresent(VertexBuffer.NormalKind)) {
+          m.createNormals(false)
+        }
+        if (m.material instanceof PBRMaterial) {
+          m.material.unlit     = false
+          m.material.metallic  = 0
+          m.material.roughness = 0.85
+        }
+      }
 
       // A skinned PBR shader takes a moment to compile, and Babylon
       // simply doesn't draw a mesh whose material isn't ready. Swapping

@@ -72,11 +72,23 @@ The game works offline and can be installed directly to your home screen:
 - **iOS (Safari):** Share → *Add to Home Screen*
 - **Desktop Chrome:** click the ⊕ icon in the address bar
 
+## Models
+
+Vehicles, trees, plants, rocks and buildings are CC0 models from
+[Kenney](https://kenney.nl)'s Car Kit, Nature Kit and City Kit, merged into
+one GLB per kit under `public/models/kits/` by `scripts/build-kits.mjs`
+(`npm run assets:kits` downloads the packs and rebuilds them). Each kit is
+loaded once at startup; every placement clones its meshes into the chunk
+and the chunk is merged per material, so a chunk full of models costs the
+same few draw calls as the old primitives. If a kit fails to load, the
+original procedural primitives are used instead.
+
 ## The character model
 
-The game ships a rigged, skinned character at `public/models/runner.glb`
-— a CC0 model from Quaternius' Animated Men Pack (31 joints, 11 clips).
-See `public/models/CREDITS.md` for provenance and swap options.
+The runner at `public/models/runner.glb` is a Kenney Mini Character (CC0,
+skinned chibi with `sprint`, `jump` and `crouch` clips). See
+`public/models/CREDITS.md`; pick a different one by changing `HERO` in
+`scripts/build-kits.mjs`.
 
 There is also a fully procedural character built from primitives, used
 automatically whenever the GLB is missing or fails to parse. It's a real
