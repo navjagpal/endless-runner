@@ -17,29 +17,37 @@ export class TrackManager {
   private scene:   Scene
   private chunks:  ChunkData[] = []
   private nextZ  = 0
-  private nextChunkDist = 0   // distance (metres) when next chunk should be zone-tagged
+  /**
+   * Run distance minus player z. Normally zero, but a dev fast-forward
+   * (`?dist=`) moves the distance without moving the player, and a
+   * chunk's zone has to follow the distance.
+   */
+  private distOffset = 0
 
-  constructor(scene: Scene) {
+  constructor(scene: Scene, distOffset = 0) {
     this.scene = scene
-    for (let i = 0; i < VISIBLE_AHEAD; i++) this._spawnChunk(0)
+    this.distOffset = distOffset
+    for (let i = 0; i < VISIBLE_AHEAD; i++) this._spawnChunk()
   }
 
   /** Expose shared mats so ZoneManager can lerp them */
   get roadMat()  { return sharedRoadMat  }
   get grassMat() { return sharedGrassMat }
 
-  private _spawnChunk(playerDist: number): void {
-    const zoneId = zoneIdForDistance(playerDist + this.nextChunkDist)
+  private _spawnChunk(): void {
+    // A chunk's zone is decided by where it *is*: the player reaches
+    // z = nextZ after travelling nextZ metres (plus any offset).
+    const zoneId = zoneIdForDistance(this.nextZ + this.distOffset)
     const chunk  = createChunk(this.scene, this.nextZ, zoneId)
     this.chunks.push(chunk)
-    this.nextZ          += CHUNK_LENGTH
-    this.nextChunkDist  += CHUNK_LENGTH
+    this.nextZ += CHUNK_LENGTH
   }
 
   update(playerZ: number, playerDist: number): void {
+    this.distOffset = playerDist - playerZ
     const furthest = this.chunks[this.chunks.length - 1]
     if (furthest && furthest.zEnd - playerZ < CHUNK_LENGTH * 3) {
-      this._spawnChunk(playerDist)
+      this._spawnChunk()
     }
 
     for (let i = this.chunks.length - 1; i >= 0; i--) {

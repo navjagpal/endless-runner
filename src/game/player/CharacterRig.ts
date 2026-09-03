@@ -169,6 +169,17 @@ export class CharacterRig implements Character {
       const container = await LoadAssetContainerAsync(file, scene)
       container.addAllToScene()
 
+      // A skinned PBR shader takes a moment to compile, and Babylon
+      // simply doesn't draw a mesh whose material isn't ready. Swapping
+      // the procedural character out before that point leaves the
+      // player invisible for a few frames — on a slow GPU, a lot of
+      // frames. Compile first, swap second.
+      await Promise.all(
+        container.meshes
+          .filter(m => m.material && m.getTotalVertices() > 0)
+          .map(m => m.material!.forceCompilationAsync(m)),
+      )
+
       const rootNodes = container.rootNodes.filter(
         (n): n is TransformNode => n instanceof TransformNode,
       )

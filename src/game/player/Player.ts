@@ -15,7 +15,9 @@ import { CharacterRig } from './CharacterRig'
 import type { Character, CharacterState } from './Character'
 import type { AudioManager } from '../audio/AudioManager'
 import type { GameEngine } from '../core/GameEngine'
-import { getFlareTexture, getBlobShadowTexture } from '../fx/Textures'
+import {
+  getBlobShadowTexture, getSoftDiscTexture, getSparkleTexture, getRainbowTexture,
+} from '../fx/Textures'
 import { getQualityProfile } from '../core/DeviceTier'
 
 /**
@@ -29,20 +31,12 @@ import { getQualityProfile } from '../core/DeviceTier'
  *   truck    2.21  ┐ must NOT clear, or lane-changing becomes pointless
  *   bus      2.24  ┘ and the rooftop ramps have no reason to exist
  *
- * The old 3.2 predates solid spans — back then jumping had no effect on
- * collision at all, so the value was free. At 3.2 a well-timed jump now
- * clears everything in the game, so it comes down to sit between the car
- * and the truck.
- *
  * Height alone isn't enough though: clearing an obstacle means staying
  * above it for the *whole* time the bodies overlap in z, and a car's
  * overlap window is 3.86 units. At the starting speed of 11 that's 0.35 s
- * of hang time needed — so the rise time matters as much as the apex, and
- * a value tuned only against the apex leaves the car unjumpable at slow
- * speed but jumpable once the run speeds up.
- *
- * These two were solved for rather than guessed: apex 2.15 (0.06 under
- * the truck roof) with the car clearing at every speed from 11 to 28.
+ * of hang time needed — so the rise time matters as much as the apex.
+ * These two were solved for rather than guessed (see
+ * scripts/verify-vertical.mjs).
  */
 const JUMP_HEIGHT        = 2.25
 const JUMP_RISE_TIME     = 0.37
@@ -87,6 +81,7 @@ export class Player {
   private posY = 0
   private velY = 0
   private groundY = 0
+  private wasAirborne = false
 
   private slideTimer  = 0
   private bumpTimer   = 0
@@ -94,11 +89,17 @@ export class Player {
 
   private invincible      = false
   private invincibleTimer = 0
+  private starPower       = false
   private audio: AudioManager | null = null
 
   private blobShadow: Mesh
   private bumpPs: ParticleSystem
   private coinPs: ParticleSystem
+  private dustPs: ParticleSystem
+  private starPs: ParticleSystem
+  private rainbowTrail: Mesh
+  private magnetRing: Mesh
+  private fxTime = 0
 
   constructor(scene: Scene, engine: GameEngine) {
     this.scene  = scene
@@ -128,9 +129,13 @@ export class Player {
     // procedural character is a perfectly good first frame.
     void this._tryUpgradeToRig()
 
-    this.blobShadow = this._makeBlobShadow(scene)
-    this.bumpPs     = this._makeBumpParticles(scene)
-    this.coinPs     = this._makeCoinParticles(scene)
+    this.blobShadow   = this._makeBlobShadow(scene)
+    this.bumpPs       = this._makeBumpParticles(scene)
+    this.coinPs       = this._makeCoinParticles(scene)
+    this.dustPs       = this._makeDustParticles(scene)
+    this.starPs       = this._makeStarParticles(scene)
+    this.rainbowTrail = this._makeRainbowTrail(scene)
+    this.magnetRing   = this._makeMagnetRing(scene)
   }
 
   private async _tryUpgradeToRig(): Promise<void> {
@@ -148,23 +153,12 @@ export class Player {
     }
   }
 
-  /**
-   * Soft dark ellipse projected under the player.
-   *
-   * The scene's real shadow map has no casters registered and never had
-   * — so despite a 2048px PCF map being rendered every frame, nothing
-   * has ever cast a shadow in this game. That matters beyond looks:
-   * without a ground contact point, a player mid-jump can't tell where
-   * they'll land relative to an obstacle.
-   */
+  /** Soft dark ellipse projected under the player — the landing cue. */
   private _makeBlobShadow(scene: Scene): Mesh {
     const blob = MeshBuilder.CreateGround('blobShadow', { width: 1.1, height: 1.3 }, scene)
     const tex  = getBlobShadowTexture(scene)
 
     const mat = new StandardMaterial('blobShadowMat', scene)
-    // The gradient carries the shape in its alpha; the surface itself is
-    // pure black and unlit, so it darkens the road without picking up
-    // zone lighting.
     mat.diffuseColor    = Color3.Black()
     mat.specularColor   = Color3.Black()
     mat.emissiveColor   = Color3.Black()
@@ -180,7 +174,7 @@ export class Player {
 
   setAudio(audio: AudioManager): void { this.audio = audio }
 
-  // ─── Controls ──────────────────────────────────────────────────────
+  // ─── Controls ──────────────────────────────────────────────────────────
 
   moveLeft(): void {
     if (this.state === 'bumping') return
@@ -209,6 +203,7 @@ export class Player {
     this.state = 'jumping'
     this.velY  = (2 * JUMP_HEIGHT) / JUMP_RISE_TIME
     this.audio?.playJump()
+    this._puff(10)
     return true
   }
 
@@ -226,12 +221,14 @@ export class Player {
     }
     this.state      = 'sliding'
     this.slideTimer = SLIDE_DURATION
+    this._puff(6)
   }
 
   // ─── Called by ObstacleManager ─────────────────────────────────────
 
-  handleCollision(): void {
-    if (this.invincible) return
+  /** Returns true when the hit counted (false while invincible). */
+  handleCollision(): boolean {
+    if (this.isInvincible) return false
     this.state           = 'bumping'
     this.bumpTimer       = BUMP_DURATION
     this.invincible      = true
@@ -239,16 +236,34 @@ export class Player {
     this.character.flashRed(true)
     this.audio?.playBump()
     this.bumpPs.start()
+    return true
   }
 
   triggerCoinEffect(): void {
     this.coinPs.start()
-    this.audio?.playCoin()
+  }
+
+  /**
+   * Star power: a reward for a clean streak. Nothing can bump the player,
+   * coins fly in, and a rainbow streams out behind — the most visible
+   * thing the game can do, which is the point of a reward.
+   */
+  setStarPower(on: boolean): void {
+    if (this.starPower === on) return
+    this.starPower = on
+    this.rainbowTrail.setEnabled(on)
+    if (on) this.starPs.start(); else this.starPs.stop()
+    if (on) this.character.setVisible(true)
+  }
+
+  setMagnet(on: boolean): void {
+    this.magnetRing.setEnabled(on)
   }
 
   // ─── Update loop ───────────────────────────────────────────────────
 
   update(dt: number, runSpeed: number, speedFrac: number): void {
+    this.fxTime += dt
     this._tickTimers(dt)
 
     // Consume a buffered jump the instant it becomes legal.
@@ -259,7 +274,7 @@ export class Player {
 
     if (this.invincible) {
       this.invincibleTimer -= dt
-      this.character.setVisible(Math.sin(this.invincibleTimer * 22) > 0)
+      if (!this.starPower) this.character.setVisible(Math.sin(this.invincibleTimer * 22) > 0)
       if (this.invincibleTimer <= 0) {
         this.invincible = false
         this.character.setVisible(true)
@@ -274,16 +289,14 @@ export class Player {
     this.mesh.position.z += runSpeed * dt
 
     this._updateBlobShadow()
+    this._updateFx(dt, speedFrac)
 
     this.character.update(dt, this.state, {
       speed: runSpeed,
       speedFrac,
       lateralVel: this.lateralVel,
       verticalVel: this.velY,
-      // Height above the *current* surface, not above the road. Using the
-      // absolute height would read a player standing on a bus roof as
-      // permanently airborne, so the landing squash would never fire again
-      // after the first ramp.
+      // Height above the *current* surface, not above the road.
       height: Math.max(0, this.posY - this.groundY),
     })
   }
@@ -317,13 +330,11 @@ export class Player {
 
   /**
    * Vertical physics, unified so a ramp or rooftop behaves exactly like the
-   * road. Airborne means gravity; grounded means stick to the surface, which
-   * is what makes a ramp visibly carry the player upward and what makes
-   * running off the far end of a rooftop become a fall rather than a
-   * teleport to ground level.
+   * road. Airborne means gravity; grounded means stick to the surface.
    */
   private _updateVertical(dt: number): void {
-    if (this.airborne) {
+    const wasAir = this.airborne
+    if (wasAir) {
       const g = (2 * JUMP_HEIGHT) / (JUMP_RISE_TIME * JUMP_RISE_TIME)
       this.velY -= g * (this.velY < 0 ? FALL_MULTIPLIER : 1) * dt
       this.posY += this.velY * dt
@@ -337,19 +348,14 @@ export class Player {
       this.posY = this.groundY
       this.velY = 0
     }
+    const nowAir = this.airborne
+    if (this.wasAirborne && !nowAir) this._puff(14)
+    this.wasAirborne = nowAir
   }
 
-  /**
-   * Height of the surface under the player. Resolved and pushed in by
-   * ObstacleManager each frame, before update().
-   */
+  /** Height of the surface under the player, pushed in by ObstacleManager. */
   setGroundY(y: number): void { this.groundY = y }
 
-  /**
-   * Shadow sits on whatever surface is under the player and shrinks with
-   * height above it. Pinning it to y=0 would leave it on the road while the
-   * player ran along a bus roof two metres up.
-   */
   private _updateBlobShadow(): void {
     const h = Math.max(0, this.posY - this.groundY)
     this.blobShadow.position.set(this.laneX, this.groundY + 0.02, this.mesh.position.z)
@@ -358,36 +364,51 @@ export class Player {
     this.blobShadow.visibility = 0.15 + 0.85 * k
   }
 
-  get position(): Vector3 { return this.mesh.position }
-  get isInvincible(): boolean { return this.invincible }
-  get isSliding(): boolean { return this.state === 'sliding' }
+  private _updateFx(dt: number, speedFrac: number): void {
+    // Dust only while the feet are on a surface.
+    this.dustPs.emitRate = this.airborne ? 0 : 14 + speedFrac * 30
 
-  /**
-   * Vertical extent of the collision body, in world units above the road.
-   *
-   * Collision used to test x and z only, which meant jumping over and
-   * sliding under an obstacle did nothing — both inputs were purely
-   * cosmetic. These two accessors are what make them mechanical.
-   */
+    const feetY = this.posY
+    this.rainbowTrail.position.set(this.laneX, feetY + 0.06, this.mesh.position.z - 2.4)
+    this.rainbowTrail.scaling.x = 0.9 + Math.sin(this.fxTime * 9) * 0.12
+
+    this.magnetRing.position.set(this.laneX, feetY + 0.9, this.mesh.position.z)
+    this.magnetRing.rotation.y += dt * 2.5
+    this.magnetRing.rotation.x = Math.PI / 2 + Math.sin(this.fxTime * 3) * 0.35
+    void dt
+  }
+
+  private _puff(count: number): void {
+    const scale = getQualityProfile().particleScale
+    this.dustPs.manualEmitCount = Math.ceil(count * scale)
+  }
+
+  get position(): Vector3 { return this.mesh.position }
+  get isInvincible(): boolean { return this.invincible || this.starPower }
+  get isSliding(): boolean { return this.state === 'sliding' }
+  get lateralVelocity(): number { return this.lateralVel }
+  get isAirborne(): boolean { return this.airborne }
+
+  /** Vertical extent of the collision body, in world units above the road. */
   get bodyBottom(): number { return this.posY }
   get bodyTop(): number {
     return this.posY + (this.state === 'sliding' ? SLIDE_HEIGHT : STAND_HEIGHT)
   }
 
-  // ─── Particle systems ──────────────────────────────────────────────
+  // ─── Particle systems & trail ──────────────────────────────────────────
 
   private _makeBumpParticles(scene: Scene): ParticleSystem {
     const scale = getQualityProfile().particleScale
     const count = Math.ceil(80 * scale)
     const ps = new ParticleSystem('bump', count, scene)
-    ps.particleTexture = getFlareTexture(scene)
+    ps.particleTexture = getSparkleTexture(scene)
     ps.emitter         = this.mesh
-    ps.minSize         = 0.10; ps.maxSize         = 0.45
+    ps.minSize         = 0.15; ps.maxSize         = 0.55
     ps.minLifeTime     = 0.25; ps.maxLifeTime     = 0.55
     ps.emitRate        = 0;    ps.manualEmitCount = count
-    ps.color1          = new Color4(1, 0.5, 0, 1)
-    ps.color2          = new Color4(1, 0.2, 0.2, 1)
-    ps.colorDead       = new Color4(1, 0, 0, 0)
+    ps.color1          = new Color4(1, 0.6, 0.1, 1)
+    ps.color2          = new Color4(1, 0.3, 0.3, 1)
+    ps.colorDead       = new Color4(1, 0.2, 0, 0)
     ps.minEmitPower    = 4;    ps.maxEmitPower    = 9
     ps.gravity         = new Vector3(0, -12, 0)
     ps.blendMode       = ParticleSystem.BLENDMODE_ADD
@@ -397,20 +418,94 @@ export class Player {
 
   private _makeCoinParticles(scene: Scene): ParticleSystem {
     const scale = getQualityProfile().particleScale
-    const count = Math.ceil(30 * scale)
+    const count = Math.ceil(24 * scale)
     const ps = new ParticleSystem('coinFx', count, scene)
-    ps.particleTexture = getFlareTexture(scene)
+    ps.particleTexture = getSparkleTexture(scene)
     ps.emitter         = this.mesh
-    ps.minSize         = 0.08; ps.maxSize         = 0.22
-    ps.minLifeTime     = 0.20; ps.maxLifeTime     = 0.40
+    ps.minEmitBox      = new Vector3(-0.3, 0.2, -0.3)
+    ps.maxEmitBox      = new Vector3( 0.3, 0.9,  0.3)
+    ps.minSize         = 0.12; ps.maxSize         = 0.34
+    ps.minLifeTime     = 0.20; ps.maxLifeTime     = 0.45
     ps.emitRate        = 0;    ps.manualEmitCount = count
-    ps.color1          = new Color4(1, 0.95, 0, 1)
+    ps.color1          = new Color4(1, 0.95, 0.3, 1)
     ps.color2          = new Color4(1, 0.8, 0.2, 1)
-    ps.colorDead       = new Color4(1, 1, 0, 0)
+    ps.colorDead       = new Color4(1, 1, 0.6, 0)
     ps.minEmitPower    = 2;    ps.maxEmitPower    = 6
-    ps.gravity         = new Vector3(0, -8, 0)
+    ps.gravity         = new Vector3(0, -6, 0)
     ps.blendMode       = ParticleSystem.BLENDMODE_ADD
     ps.targetStopDuration = 0.25
     return ps
+  }
+
+  /** Little dust kicks at the heels — cheap, and it grounds the runner. */
+  private _makeDustParticles(scene: Scene): ParticleSystem {
+    const scale = getQualityProfile().particleScale
+    const ps = new ParticleSystem('dust', Math.ceil(120 * scale), scene)
+    ps.particleTexture = getSoftDiscTexture(scene)
+    ps.emitter         = this.mesh
+    ps.minEmitBox      = new Vector3(-0.25, -0.75, -0.3)
+    ps.maxEmitBox      = new Vector3( 0.25, -0.65,  0.1)
+    ps.minSize         = 0.18; ps.maxSize = 0.45
+    ps.minLifeTime     = 0.30; ps.maxLifeTime = 0.6
+    ps.emitRate        = 20
+    ps.color1          = new Color4(1, 1, 1, 0.55)
+    ps.color2          = new Color4(0.95, 0.92, 0.85, 0.4)
+    ps.colorDead       = new Color4(1, 1, 1, 0)
+    ps.direction1      = new Vector3(-0.6, 0.6, -2.5)
+    ps.direction2      = new Vector3( 0.6, 1.6, -4.0)
+    ps.minEmitPower    = 0.6; ps.maxEmitPower = 1.4
+    ps.gravity         = new Vector3(0, -1.5, 0)
+    ps.blendMode       = ParticleSystem.BLENDMODE_STANDARD
+    ps.start()
+    return ps
+  }
+
+  private _makeStarParticles(scene: Scene): ParticleSystem {
+    const scale = getQualityProfile().particleScale
+    const ps = new ParticleSystem('starFx', Math.ceil(160 * scale), scene)
+    ps.particleTexture = getSparkleTexture(scene)
+    ps.emitter         = this.mesh
+    ps.minEmitBox      = new Vector3(-0.5, -0.6, -0.4)
+    ps.maxEmitBox      = new Vector3( 0.5,  0.9,  0.4)
+    ps.minSize         = 0.15; ps.maxSize = 0.45
+    ps.minLifeTime     = 0.35; ps.maxLifeTime = 0.8
+    ps.emitRate        = 55 * scale
+    ps.color1          = new Color4(1, 0.4, 0.9, 1)
+    ps.color2          = new Color4(0.4, 0.9, 1, 1)
+    ps.colorDead       = new Color4(1, 1, 0.5, 0)
+    ps.direction1      = new Vector3(-1.5, 0.5, -4)
+    ps.direction2      = new Vector3( 1.5, 2.5, -6)
+    ps.minEmitPower    = 0.8; ps.maxEmitPower = 1.8
+    ps.gravity         = new Vector3(0, -2, 0)
+    ps.blendMode       = ParticleSystem.BLENDMODE_ADD
+    return ps
+  }
+
+  private _makeRainbowTrail(scene: Scene): Mesh {
+    const trail = MeshBuilder.CreatePlane('rainbowTrail', { width: 1.1, height: 4.4 }, scene)
+    trail.rotation.x = Math.PI / 2
+    const mat = new StandardMaterial('rainbowMat', scene)
+    mat.disableLighting = true
+    mat.emissiveColor   = Color3.White()
+    mat.diffuseTexture  = getRainbowTexture(scene)
+    ;(mat.diffuseTexture as import('@babylonjs/core').Texture).wAng = Math.PI / 2
+    mat.alpha           = 0.78
+    mat.backFaceCulling = false
+    trail.material   = mat
+    trail.isPickable = false
+    trail.setEnabled(false)
+    return trail
+  }
+
+  private _makeMagnetRing(scene: Scene): Mesh {
+    const ring = MeshBuilder.CreateTorus('magnetRing', { diameter: 1.7, thickness: 0.07, tessellation: 24 }, scene)
+    const mat = new StandardMaterial('magnetRingMat', scene)
+    mat.disableLighting = true
+    mat.emissiveColor   = new Color3(0.45, 0.85, 1.0)
+    mat.alpha           = 0.85
+    ring.material   = mat
+    ring.isPickable = false
+    ring.setEnabled(false)
+    return ring
   }
 }

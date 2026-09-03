@@ -6,15 +6,53 @@ A high-quality 3D endless runner PWA built with Babylon.js — inspired by Subwa
 
 ## Features
 
-- **3D graphics** powered by Babylon.js 9 with PBR materials, bloom, SSAO, and dynamic shadows
+- **Stylized 3D graphics** powered by Babylon.js 9 — gradient sky dome with sun and cartoon
+  clouds, procedural textures (asphalt, grass, lit building facades), a painted-backdrop
+  layer of hills / mountains / skyline / ocean / planets per zone, flat-shaded props with
+  baked light gradients, bloom and a saturated colour grade
 - **5 themed zones** — Meadow → Forest → City → Beach → Space, each with unique props, lighting, music, and sky
 - **No death mechanic** — the character bumps on collision and keeps running, perfect for young players
-- **Vehicles as obstacles** — procedurally built cars, delivery trucks, and school buses
-- **Animated character** — runs, jumps, slides, and flashes on collision
-- **Coin collection** with bobbing animations and particle effects
-- **Milestone celebrations** at 100 m, 250 m, 500 m, 1 km, and beyond
+- **Kid Mode** (default on) — see below
+- **Rewards for clean running** — coin multiplier, a Star Power meter, magnet pickups
+- **Vehicles as obstacles** — procedurally built cars, delivery trucks, and school buses, some with
+  ramps onto the roof and a coin trail up top
+- **Animated character** — rigged run/jump, procedural slide and stumble, dust at the heels
+- **Coin collection** with sparkles, coin arcs over barriers, low coins under gantries
+- **Milestone celebrations** and zone-change confetti; persistent best distance with "New Best!"
+- **Big on-screen buttons** for touch devices (toggle in settings)
 - **Pause menu** — tap the ⏸ button or press `Esc`
 - **Procedural audio** — zone-specific music and sound effects via Web Audio API
+
+## Kid Mode
+
+The game is tuned for a six-year-old who should never lose but should still
+have a reason to play well. With Kid Mode on (the default, toggle in ⚙️):
+
+| What | Kid Mode | Off |
+|------|----------|-----|
+| Top speed | 17 m/s, reached slowly | 28 m/s |
+| Gap between obstacles | ≥ 1.35 s of travel | ≥ 0.95 s |
+| Ramps on trucks/buses | 55 % | 40 % |
+| Magnet pickups | every ~170–260 m | every ~260–400 m |
+| Coins lost on a bump | 5 (never below 0) | 10 % of coins, min 5 |
+
+A **bump never ends the run**. It costs a little: the runner slows for a
+moment, a handful of coins spill out, the coin multiplier resets and the
+Star meter halves. Running clean pays: every dodge fills the ⭐ meter, a
+full meter gives ~7 s of **Star Power** (can't be bumped, coins fly in, a
+rainbow trails behind), and collecting coins without a bump climbs the
+multiplier to x2 / x3 / x4.
+
+## Dev shortcuts
+
+Query parameters, useful for screenshots and balance checks:
+
+| Param | Effect |
+|-------|--------|
+| `?auto=1` | Start the run immediately |
+| `&dist=1010` | Start in the zone for that distance (0 / 500 / 1000 / 1500 / 2000) |
+| `&star=1` | Start with Star Power on |
+| `?sim=60` | Run 60 s of random-input autopilot before the first frame and log `[sim] …` to the console |
 
 ## Controls
 

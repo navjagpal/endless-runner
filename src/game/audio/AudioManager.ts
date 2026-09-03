@@ -76,31 +76,113 @@ export class AudioManager {
     osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.28)
   }
 
-  playCoin(): void {
+  /**
+   * Coin chime. `level` climbs with the coin streak so a long clean run
+   * literally sounds higher and brighter — the reward is audible.
+   */
+  playCoin(level = 0): void {
     const ctx   = this._ctx()
-    const freqs = [880, 1100, 1320]
+    const base  = 880 * Math.pow(2, Math.min(level, 7) / 12)
+    const freqs = [base, base * 1.25, base * 1.5]
     freqs.forEach((f, i) => {
       const osc = ctx.createOscillator(); const g = ctx.createGain()
       osc.connect(g); g.connect(this._masterGain)
       osc.type = 'sine'
-      const t = ctx.currentTime + i * 0.07
+      const t = ctx.currentTime + i * 0.06
       osc.frequency.value = f
-      g.gain.setValueAtTime(0.11, t)
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.18)
-      osc.start(t); osc.stop(t + 0.18)
+      g.gain.setValueAtTime(0.10, t)
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.16)
+      osc.start(t); osc.stop(t + 0.16)
     })
   }
 
+  /** A soft cartoon "boing" rather than a harsh buzz — it's a kids' game. */
   playBump(): void {
     const ctx = this._ctx()
     const osc = ctx.createOscillator(); const g = ctx.createGain()
     osc.connect(g); g.connect(this._masterGain)
-    osc.type = 'sawtooth'
-    osc.frequency.setValueAtTime(200, ctx.currentTime)
-    osc.frequency.exponentialRampToValueAtTime(42, ctx.currentTime + 0.30)
-    g.gain.setValueAtTime(0.34, ctx.currentTime)
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.42)
-    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.42)
+    osc.type = 'triangle'
+    osc.frequency.setValueAtTime(320, ctx.currentTime)
+    osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.22)
+    osc.frequency.exponentialRampToValueAtTime(180, ctx.currentTime + 0.34)
+    g.gain.setValueAtTime(0.26, ctx.currentTime)
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.40)
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.40)
+  }
+
+  /** Rising arpeggio when the star meter fills. */
+  playStar(): void {
+    const ctx   = this._ctx()
+    const freqs = [523, 659, 784, 1047, 1319, 1568, 2093]
+    freqs.forEach((f, i) => {
+      const osc = ctx.createOscillator(); const g = ctx.createGain()
+      osc.connect(g); g.connect(this._masterGain)
+      osc.type = i % 2 ? 'triangle' : 'square'
+      const t = ctx.currentTime + i * 0.07
+      osc.frequency.value = f
+      g.gain.setValueAtTime(0.08, t)
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.30)
+      osc.start(t); osc.stop(t + 0.30)
+    })
+  }
+
+  playMagnet(): void {
+    const ctx = this._ctx()
+    const osc = ctx.createOscillator(); const g = ctx.createGain()
+    osc.connect(g); g.connect(this._masterGain)
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(400, ctx.currentTime)
+    osc.frequency.exponentialRampToValueAtTime(1600, ctx.currentTime + 0.35)
+    g.gain.setValueAtTime(0.14, ctx.currentTime)
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45)
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.45)
+  }
+
+  /** Streak / multiplier fanfare; `level` picks how many notes. */
+  playStreak(level: number): void {
+    const ctx   = this._ctx()
+    const count = 2 + Math.min(4, Math.round(level))
+    for (let i = 0; i < count; i++) {
+      const osc = ctx.createOscillator(); const g = ctx.createGain()
+      osc.connect(g); g.connect(this._masterGain)
+      osc.type = 'triangle'
+      const t = ctx.currentTime + i * 0.08
+      osc.frequency.value = 660 * Math.pow(2, i * 2 / 12)
+      g.gain.setValueAtTime(0.09, t)
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.22)
+      osc.start(t); osc.stop(t + 0.22)
+    }
+  }
+
+  /** A swoopy "wheee" for ramps and rooftops. */
+  playWhee(): void {
+    const ctx = this._ctx()
+    const osc = ctx.createOscillator(); const g = ctx.createGain()
+    osc.connect(g); g.connect(this._masterGain)
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(500, ctx.currentTime)
+    osc.frequency.exponentialRampToValueAtTime(1300, ctx.currentTime + 0.30)
+    osc.frequency.exponentialRampToValueAtTime(900, ctx.currentTime + 0.55)
+    g.gain.setValueAtTime(0.12, ctx.currentTime)
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6)
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.6)
+  }
+
+  playBest(): void {
+    const ctx   = this._ctx()
+    const freqs = [784, 784, 784, 1047, 1319]
+    const gaps  = [0, 0.12, 0.24, 0.36, 0.60]
+    freqs.forEach((f, i) => {
+      const osc = ctx.createOscillator(); const g = ctx.createGain()
+      osc.connect(g); g.connect(this._masterGain)
+      osc.type = 'square'
+      const t = ctx.currentTime + gaps[i]
+      osc.frequency.value = f
+      const d = i === 4 ? 0.6 : 0.14
+      g.gain.setValueAtTime(0.07, t)
+      g.gain.exponentialRampToValueAtTime(0.001, t + d)
+      osc.start(t); osc.stop(t + d)
+    })
   }
 
   playCelebration(): void {
@@ -125,9 +207,6 @@ export class AudioManager {
     this._musicRunning = true
 
     const ctx         = this._ctx()
-    this._masterGain  = ctx.createGain()
-    this._masterGain.gain.value = 0.7
-    this._masterGain.connect(ctx.destination)
 
     this._musicGain   = ctx.createGain()
     this._musicGain.gain.value = 0.55
@@ -142,6 +221,13 @@ export class AudioManager {
 
   private _ctx(): AudioContext {
     if (!this.ctx) this.ctx = new AudioContext()
+    // SFX can fire before the music starts (a tap on the start screen),
+    // so the master bus is created on first use rather than in startMusic.
+    if (!this._masterGain) {
+      this._masterGain = this.ctx.createGain()
+      this._masterGain.gain.value = 0.7
+      this._masterGain.connect(this.ctx.destination)
+    }
     return this.ctx
   }
 
