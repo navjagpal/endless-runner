@@ -13,6 +13,7 @@ import {
 import { styleChunk } from './ChunkStyling'
 import { getQualityProfile } from '../core/DeviceTier'
 import { getAsphaltTexture, getGrassTexture, getBuildingTextures } from '../fx/Textures'
+import { Kits } from '../assets/Kits'
 
 export const LANE_POSITIONS = [-2.5, 0, 2.5]
 export const CHUNK_LENGTH   = 30
@@ -166,6 +167,7 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
   const stats = styleChunk(root, {
     plainMaterials: _plainMaterials(),
     authoredColorMaterials: new Set<Material>([sharedGrassMat]),
+    preShadedMaterials: Kits.materials,
     flatShade: getQualityProfile().flatShade,
   })
   if (!_loggedStyleStats) {
@@ -322,6 +324,7 @@ function _addZoneProps(scene: Scene, root: Mesh, zStart: number, zoneId: string)
 // ─── Meadow: puffy trees, bushes, white fences, flowers ───────────────────────
 
 function _addMeadowProps(scene: Scene, root: Mesh, zStart: number, spacing: number): void {
+  if (Kits.isLoaded('nature')) { _addMeadowKit(scene, root, zStart, spacing); return }
   const leafMatA = _pbr(scene, new Color3(0.22, 0.72, 0.20))
   const leafMatB = _pbr(scene, new Color3(0.36, 0.80, 0.16))
   const leafMatC = _pbr(scene, new Color3(0.16, 0.62, 0.26))
@@ -393,6 +396,7 @@ function _addMeadowProps(scene: Scene, root: Mesh, zStart: number, spacing: numb
 // ─── Forest: pine trees, mushrooms, rocks, stumps ─────────────────────────────
 
 function _addForestProps(scene: Scene, root: Mesh, zStart: number, spacing: number): void {
+  if (Kits.isLoaded('nature')) { _addForestKit(scene, root, zStart, spacing); return }
   const darkLeaf = _pbr(scene, new Color3(0.12, 0.46, 0.16))
   const pineLeaf = _pbr(scene, new Color3(0.08, 0.38, 0.12))
   const lightLeaf = _pbr(scene, new Color3(0.30, 0.62, 0.22))
@@ -440,6 +444,7 @@ function _addForestProps(scene: Scene, root: Mesh, zStart: number, spacing: numb
 // ─── City: textured buildings, billboards, street furniture ──────────────────
 
 function _addCityProps(scene: Scene, root: Mesh, zStart: number, _spacing: number): void {
+  if (Kits.isLoaded('city') && Kits.isLoaded('nature')) { _addCityKit(scene, root, zStart); return }
   for (const side of [-1, 1]) {
     for (let i = 0; i < 4; i++) {
       const bz = zStart + i * (CHUNK_LENGTH / 4) + Math.random() * 2
@@ -469,6 +474,10 @@ function _addCityProps(scene: Scene, root: Mesh, zStart: number, _spacing: numbe
     }
   }
 
+  _addCityFurniture(scene, root, zStart)
+}
+
+function _addCityFurniture(scene: Scene, root: Mesh, zStart: number): void {
   // Fire hydrants and traffic cones
   const hydrantMat = _pbr(scene, new Color3(0.92, 0.15, 0.12))
   const coneMat    = _pbr(scene, new Color3(1.0, 0.45, 0.05))
@@ -493,6 +502,7 @@ function _addCityProps(scene: Scene, root: Mesh, zStart: number, _spacing: numbe
 // ─── Beach: palm trees, umbrellas, beach balls, sandcastles ──────────────────
 
 function _addBeachProps(scene: Scene, root: Mesh, zStart: number, spacing: number): void {
+  if (Kits.isLoaded('nature')) { _addBeachKit(scene, root, zStart, spacing); return }
   for (let i = 0; i < 5; i++) {
     const z = zStart + 1 + i * spacing + (Math.random() - 0.5) * 2
     for (const side of [-1, 1]) {
@@ -587,6 +597,154 @@ function _addSpaceProps(scene: Scene, root: Mesh, zStart: number, _spacing: numb
     star.position = new Vector3(sx, 0.04, sz)
     star.material = starMat
     star.parent   = root
+  }
+}
+
+// ─── Kit-based props ──────────────────────────────────────────────────────────
+//
+// The same layouts as the primitive builders above, placed with Kenney
+// models. Scales convert the kits' ~1-unit models to the metres the track
+// is built in; the random spread on each keeps a row from reading as one
+// asset stamped repeatedly.
+
+function _pick<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)] }
+function _rnd(lo: number, hi: number): number { return lo + Math.random() * (hi - lo) }
+function _yaw(): number { return Math.random() * Math.PI * 2 }
+
+const MEADOW_TREES = ['tree_default', 'tree_oak', 'tree_fat', 'tree_detailed', 'tree_simple', 'tree_tall', 'tree_blocks', 'tree_default_dark']
+const BUSHES       = ['plant_bush', 'plant_bushLarge', 'plant_bushDetailed']
+const FLOWERS      = ['flower_redA', 'flower_redB', 'flower_purpleA', 'flower_purpleC', 'flower_yellowA', 'flower_yellowB']
+const PINES        = ['tree_pineTallA', 'tree_pineTallB', 'tree_pineRoundA', 'tree_pineRoundB', 'tree_pineDefaultA', 'tree_pineSmallA']
+const MUSHROOMS    = ['mushroom_red', 'mushroom_redGroup', 'mushroom_tan', 'mushroom_tanTall']
+const ROCKS        = ['rock_largeA', 'rock_largeB', 'rock_tallA']
+const SMALL_ROCKS  = ['rock_smallA', 'rock_smallB']
+const PALMS        = ['tree_palmTall', 'tree_palmBend', 'tree_palmDetailedTall', 'tree_palmShort']
+const BUILDINGS    = ['building-a', 'building-b', 'building-c', 'building-d', 'building-e', 'building-f', 'building-g', 'building-h']
+const SKYSCRAPERS  = ['building-skyscraper-a', 'building-skyscraper-b']
+
+function _addMeadowKit(_scene: Scene, root: Mesh, zStart: number, spacing: number): void {
+  for (let i = 0; i < 5; i++) {
+    const z = zStart + 1 + i * spacing + _rnd(-1, 1)
+    for (const side of [-1, 1]) {
+      Kits.place(root, _pick(MEADOW_TREES), side * _rnd(7.8, 9.3), 0, z, _rnd(3.4, 4.8), _yaw())
+      if (Math.random() < 0.75)
+        Kits.place(root, _pick(MEADOW_TREES), side * _rnd(12.5, 20), 0, z + spacing * 0.5, _rnd(3.0, 4.6), _yaw())
+    }
+  }
+  for (let i = 0; i < 6; i++) {
+    const side = Math.random() > 0.5 ? 1 : -1
+    Kits.place(root, _pick(BUSHES), side * _rnd(6.2, 9.5), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.4, 3.6), _yaw())
+  }
+  // Wooden fence along the verge: 1-unit panels scaled to 2 m, laid end to end.
+  for (let i = 0; i < CHUNK_LENGTH / 2; i++) {
+    const z = zStart + 1 + i * 2
+    for (const side of [-1, 1]) Kits.place(root, 'fence_simple', side * 5.3, 0, z, 2.0, Math.PI / 2)
+  }
+  for (let i = 0; i < 6; i++) {
+    const cx = (Math.random() > 0.5 ? 1 : -1) * _rnd(6.5, 16)
+    const cz = zStart + Math.random() * CHUNK_LENGTH
+    const flower = _pick(FLOWERS)
+    for (let k = 0; k < 3; k++) Kits.place(root, flower, cx + _rnd(-0.8, 0.8), 0, cz + _rnd(-0.8, 0.8), _rnd(2.0, 2.6), _yaw())
+  }
+  for (let i = 0; i < 6; i++) {
+    Kits.place(root, 'grass_large', (Math.random() > 0.5 ? 1 : -1) * _rnd(6, 18), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.2, 3.0), _yaw())
+  }
+  for (let i = 0; i < 2; i++) {
+    Kits.place(root, _pick(SMALL_ROCKS), (Math.random() > 0.5 ? 1 : -1) * _rnd(7, 15), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(1.8, 2.6), _yaw())
+  }
+}
+
+function _addForestKit(_scene: Scene, root: Mesh, zStart: number, spacing: number): void {
+  for (let i = 0; i < 6; i++) {
+    const z = zStart + i * (spacing * 0.85)
+    for (const side of [-1, 1]) {
+      Kits.place(root, _pick(PINES), side * _rnd(7.2, 10), 0, z, _rnd(3.8, 5.4), _yaw())
+      if (Math.random() < 0.85)
+        Kits.place(root, _pick(PINES), side * _rnd(12, 21), 0, z + 2.5, _rnd(3.6, 5.6), _yaw())
+    }
+  }
+  for (let i = 0; i < 5; i++) {
+    Kits.place(root, _pick(MUSHROOMS), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.2, 10), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.4, 4.0), _yaw())
+  }
+  for (let i = 0; i < 3; i++) {
+    Kits.place(root, _pick(ROCKS), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.5, 14), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.0, 3.2), _yaw())
+  }
+  for (let i = 0; i < 2; i++) {
+    Kits.place(root, _pick(['stump_round', 'stump_oldTall', 'log', 'log_stack']), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.2, 9), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.2, 3.0), _yaw())
+  }
+  for (let i = 0; i < 4; i++) {
+    Kits.place(root, _pick(BUSHES), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.2, 12), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.2, 3.2), _yaw())
+  }
+}
+
+function _addCityKit(scene: Scene, root: Mesh, zStart: number): void {
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 4; i++) {
+      const bz = zStart + 3.8 + i * (CHUNK_LENGTH / 4) + _rnd(-0.6, 0.6)
+      const tall  = Math.random() < 0.15
+      const model = tall ? _pick(SKYSCRAPERS) : _pick(BUILDINGS)
+      const size  = Kits.size(model)
+      if (!size) continue
+      const scale = tall ? _rnd(4.6, 5.4) : _rnd(5.6, 6.6)
+      // Facade flush with the sidewalk edge, whatever the footprint.
+      const x = side * (11.4 + size.x * scale / 2)
+      Kits.place(root, model, x, 0, bz, scale, side > 0 ? -Math.PI / 2 : Math.PI / 2)
+    }
+  }
+
+  // Street trees in planters along the kerb
+  const planterMat = _pbr(scene, new Color3(0.55, 0.30, 0.20))
+  for (let i = 0; i < 3; i++) {
+    const z = zStart + 4 + i * 10
+    for (const side of [-1, 1]) {
+      const planter = MeshBuilder.CreateBox('planter', { width: 0.9, height: 0.5, depth: 0.9 }, scene)
+      planter.position = new Vector3(side * 6.4, 0.25, z)
+      planter.material = planterMat; planter.parent = root
+      Kits.place(root, _pick(['tree_small', 'tree_simple', 'tree_oak']), side * 6.4, 0.5, z, _rnd(2.2, 2.8), _yaw())
+    }
+  }
+
+  _addCityFurniture(scene, root, zStart)
+}
+
+function _addBeachKit(scene: Scene, root: Mesh, zStart: number, spacing: number): void {
+  for (let i = 0; i < 5; i++) {
+    const z = zStart + 1 + i * spacing + _rnd(-1, 1)
+    for (const side of [-1, 1]) {
+      Kits.place(root, _pick(PALMS), side * _rnd(7, 10), 0, z, _rnd(3.6, 4.8), _yaw())
+      if (Math.random() < 0.6) Kits.place(root, _pick(PALMS), side * _rnd(12, 18), 0, z + 3, _rnd(3.2, 4.4), _yaw())
+    }
+  }
+  for (let i = 0; i < 3; i++) {
+    _addUmbrella(scene, root, (Math.random() > 0.5 ? 8 : -8) + _rnd(-1, 1), zStart + Math.random() * CHUNK_LENGTH)
+  }
+  const ballMats = [
+    _pbr(scene, new Color3(1, 0.25, 0.3)), _pbr(scene, new Color3(0.2, 0.6, 1)), _pbr(scene, new Color3(1, 0.85, 0.1)),
+  ]
+  for (let i = 0; i < 3; i++) {
+    const ball = MeshBuilder.CreateSphere('ball', { diameter: 0.6, segments: 6 }, scene)
+    ball.position = new Vector3((Math.random() > 0.5 ? 7 : -7) + _rnd(-1.5, 1.5), 0.3, zStart + Math.random() * CHUNK_LENGTH)
+    ball.material = ballMats[i % 3]; ball.parent = root
+  }
+  for (let i = 0; i < 3; i++) {
+    Kits.place(root, _pick(SMALL_ROCKS), (Math.random() > 0.5 ? 1 : -1) * _rnd(7, 16), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(1.8, 2.8), _yaw())
+  }
+  for (let i = 0; i < 5; i++) {
+    Kits.place(root, 'grass_large', (Math.random() > 0.5 ? 1 : -1) * _rnd(6, 16), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.0, 2.8), _yaw())
+  }
+  // Sandcastles stay primitive — the kit has none, and kids love them.
+  const sandMat = _pbr(scene, new Color3(0.94, 0.82, 0.55))
+  for (let i = 0; i < 2; i++) {
+    const sx = (Math.random() > 0.5 ? 9 : -9) + _rnd(-1.5, 1.5)
+    const sz = zStart + 5 + i * 14
+    const baseB = MeshBuilder.CreateBox('sc', { width: 1.4, height: 0.5, depth: 1.4 }, scene)
+    baseB.position = new Vector3(sx, 0.25, sz); baseB.material = sandMat; baseB.parent = root
+    for (const [dx, dz] of [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]) {
+      const tower = MeshBuilder.CreateCylinder('sct', { height: 0.8, diameter: 0.36, tessellation: 6 }, scene)
+      tower.position = new Vector3(sx + dx, 0.65, sz + dz); tower.material = sandMat; tower.parent = root
+      const roof = MeshBuilder.CreateCylinder('scr', { height: 0.3, diameterTop: 0, diameterBottom: 0.4, tessellation: 6 }, scene)
+      roof.position = new Vector3(sx + dx, 1.2, sz + dz); roof.material = sandMat; roof.parent = root
+    }
   }
 }
 

@@ -53,6 +53,12 @@ export interface ChunkStyleOptions {
   authoredColorMaterials?: Set<Material>
   /** Flat shading roughly triples vertex count; skip it on the low tier. */
   flatShade: boolean
+  /**
+   * Materials whose meshes were authored flat-shaded already (the model
+   * kits). They still get merged and gradiented, but re-splitting their
+   * normals would only triple their vertex count for nothing.
+   */
+  preShadedMaterials?: Set<Material>
   /** Override the gradient range. Vehicles want a shallower ramp than foliage. */
   gradient?: { bottom: number; top: number }
 }
@@ -76,17 +82,21 @@ export function styleChunk(root: Mesh, opts: ChunkStyleOptions): ChunkStyleStats
   root.computeWorldMatrix(true)
   for (const mesh of children) mesh.computeWorldMatrix(true)
 
-  // Group by material — a merged mesh can only carry one.
-  const groups = new Map<Material, Mesh[]>()
+  // Group by material — a merged mesh can only carry one — and by vertex
+  // layout, because VertexData.merge refuses sources whose attribute
+  // sets differ (a kit model with UVs next to one without, say). Two
+  // layouts under one material simply become two meshes.
+  const groups = new Map<string, { mat: Material; meshes: Mesh[] }>()
   for (const mesh of children) {
     const mat = mesh.material
     if (!mat) continue
-    const list = groups.get(mat)
-    list ? list.push(mesh) : groups.set(mat, [mesh])
+    const key = `${mat.uniqueId}|${mesh.getVerticesDataKinds().sort().join(',')}`
+    const g = groups.get(key)
+    g ? g.meshes.push(mesh) : groups.set(key, { mat, meshes: [mesh] })
   }
 
   let after = 0
-  for (const [mat, meshes] of groups) {
+  for (const { mat, meshes } of groups.values()) {
     const merged = meshes.length > 1
       ? Mesh.MergeMeshes(meshes, true, true, undefined, false, false)
       : meshes[0]
@@ -107,7 +117,7 @@ export function styleChunk(root: Mesh, opts: ChunkStyleOptions): ChunkStyleStats
       continue
     }
 
-    if (opts.flatShade) merged.convertToFlatShadedMesh()
+    if (opts.flatShade && !opts.preShadedMaterials?.has(mat)) merged.convertToFlatShadedMesh()
 
     if (opts.authoredColorMaterials?.has(mat)) {
       merged.receiveShadows = true

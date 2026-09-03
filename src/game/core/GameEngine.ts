@@ -81,10 +81,15 @@ export class GameEngine {
     hemiLight.groundColor = new Color3(0.40, 0.30, 0.20)
     hemiLight.diffuse     = new Color3(0.80, 0.90, 1.00)
 
-    const sunLight = new DirectionalLight('sun', new Vector3(-0.6, -1.8, -1), this.scene)
+    // The light travels +z (over the camera's shoulder, down the track), so
+    // the faces the camera actually sees — the runner's back, the tails
+    // of the traffic, the fronts of everything approaching — are the lit
+    // ones. The decorative sun disc in the sky sits ahead of the player
+    // regardless; nobody checks.
+    const sunLight = new DirectionalLight('sun', new Vector3(-0.45, -1.6, 1.0), this.scene)
     sunLight.intensity = 1.2
     sunLight.diffuse   = new Color3(1.0, 0.95, 0.85)
-    sunLight.position  = new Vector3(30, 60, 30)
+    sunLight.position  = new Vector3(20, 60, -40)
 
     if (!this.quality.realtimeShadows) {
       // Low tier reads depth from the player's blob shadow instead. The

@@ -51,6 +51,7 @@ export class HUD {
   private settingsScreen: HTMLDivElement
   private pauseBtn:       HTMLButtonElement
   private settingsBtn:    HTMLButtonElement
+  private playBtn!:       HTMLButtonElement
   private touchPad:       HTMLDivElement
 
   private settings: GameSettings = loadSettings()
@@ -235,6 +236,13 @@ export class HUD {
     this.setTouchButtons(this.settings.touchButtons)
   }
 
+  /** Models are still loading: keep the Play button visibly waiting. */
+  setReady(ready: boolean): void {
+    this.playBtn.disabled = !ready
+    this.playBtn.textContent = ready ? '▶  Play!' : '⏳  Loading…'
+    this.playBtn.style.opacity = ready ? '1' : '0.7'
+  }
+
   showPause(): void { this.pauseScreen.style.display = 'flex' }
   hidePause(): void { this.pauseScreen.style.display = 'none' }
 
@@ -393,6 +401,7 @@ export class HUD {
       text-shadow:0 2px 0 rgba(0,0,0,0.2);
     `
     playBtn.textContent = '▶  Play!'
+    this.playBtn = playBtn
     playBtn.addEventListener('pointerenter', () => { playBtn.style.transform='scale(1.06)' })
     playBtn.addEventListener('pointerleave', () => { playBtn.style.transform='scale(1)' })
     playBtn.addEventListener('pointerup',    () => { playBtn.style.transform='scale(1)'; this.onPlay?.() })

@@ -1,4 +1,4 @@
-import { Vector3 } from '@babylonjs/core'
+import { Vector3, type Scene } from '@babylonjs/core'
 import { GameEngine }          from './core/GameEngine'
 import { FollowCamera }        from './core/FollowCamera'
 import { setupPostProcessing } from './core/PostProcessing'
@@ -13,6 +13,7 @@ import { ZoneManager }         from './zones/ZoneManager'
 import { Backdrop }            from './zones/Backdrop'
 import { CelebrationManager }  from './ui/CelebrationManager'
 import { HUD }                 from './ui/HUD'
+import { Kits }                from './assets/Kits'
 import {
   type GameSettings, SPEED_MIN, SPEED_MAX, KID_SPEED_MAX, loadBest, saveBest, type BestRecord,
 } from './ui/Settings'
@@ -58,12 +59,14 @@ const MULTIPLIER_STEPS = [0, 30, 80, 160]    // coin streak needed for x1..x4
 export class Game {
   private engine:       GameEngine
   private camera:       FollowCamera
-  private track:        TrackManager
   private player:       Player
-  private obstacles:    ObstacleManager
   private audio:        AudioManager
   private speedLines:   SpeedLines | null = null
+  // Built once the model kits are in — see _init().
+  private track!:       TrackManager
+  private obstacles!:   ObstacleManager
   private zones:        ZoneManager | null = null
+  private ready         = false
   private backdrop:     Backdrop
   private celebrations: CelebrationManager | null = null
   private hud:          HUD
@@ -114,8 +117,6 @@ export class Game {
 
     this.player    = new Player(scene, this.engine)
     this.camera    = new FollowCamera(scene)
-    this.track     = new TrackManager(scene, devDist)
-    this.obstacles = new ObstacleManager(scene)
     this.audio     = new AudioManager()
     this.hud       = new HUD()
     this.backdrop  = new Backdrop(scene)
@@ -134,6 +135,44 @@ export class Game {
       else this.player.slide()
     }
     this.hud.setTouchButtons(this.settings.touchButtons)
+
+    this.hud.onPlay   = () => this._startRun()
+    this.hud.onPause  = () => this._pause()
+    this.hud.onResume = () => this._resume()
+
+    this.hud.onSettingsChange = (s: GameSettings) => {
+      this.settings = s
+      this.zones?.setBrightMode(s.brightZones)
+      this.hud.setTouchButtons(s.touchButtons)
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { this._saveBest(); this._pause() }
+    })
+
+    this.hud.showStart(this.best)
+    this.hud.setReady(false)
+    this.engine.start(() => this._tick())
+
+    void this._init(scene, env, devDist, q)
+  }
+
+  /**
+   * The part of setup that needs the model kits: the track and the
+   * obstacles are built from them, and everything downstream hangs off
+   * the track's materials. The sky, camera and start screen are already
+   * up while this runs, so the wait reads as a loading beat, not a hang.
+   */
+  private async _init(
+    scene: Scene,
+    env: ReturnType<typeof setupEnvironment>,
+    devDist: number,
+    q: URLSearchParams,
+  ): Promise<void> {
+    await Kits.load(scene, ['vehicles', 'nature', 'city'])
+
+    this.track     = new TrackManager(scene, devDist)
+    this.obstacles = new ObstacleManager(scene)
 
     this.zones = new ZoneManager(
       scene,
@@ -163,26 +202,12 @@ export class Game {
       this.celebrations = new CelebrationManager(scene, this.player.mesh)
     })
 
-    this.hud.onPlay   = () => this._startRun()
-    this.hud.onPause  = () => this._pause()
-    this.hud.onResume = () => this._resume()
-
-    this.hud.onSettingsChange = (s: GameSettings) => {
-      this.settings = s
-      this.zones?.setBrightMode(s.brightZones)
-      this.hud.setTouchButtons(s.touchButtons)
-    }
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { this._saveBest(); this._pause() }
-    })
-
-    this.hud.showStart(this.best)
-    this.engine.start(() => this._tick())
+    this.ready = true
+    this.hud.setReady(true)
 
     if (q.has('auto') || q.has('sim')) {
       this._startRun()
-      if (devDist > 0) { this.totalDistance = devDist; this.zones.snap(devDist) }
+      if (devDist > 0) { this.totalDistance = devDist; this.zones!.snap(devDist) }
       if (q.has('star')) this._startStarPower()
       const simSecs = Number(q.get('sim')) || 0
       if (simSecs > 0) this._simulate(simSecs)
@@ -218,6 +243,7 @@ export class Game {
   private _maxSpeed():  number { return this.settings.kidMode ? KID_SPEED_MAX  : SPEED_MAX }
 
   private _startRun(): void {
+    if (!this.ready) return
     this.audio.resume()
     this.audio.startMusic()
     this.running       = true
@@ -373,7 +399,7 @@ export class Game {
   }
 
   private _step(rawDt: number): void {
-    if (!this.running || this.paused) return
+    if (!this.ready || !this.running || this.paused) return
 
     // Hit-stop: hold the world still for a beat after an impact. The
     // camera still updates so the shake reads during the freeze.

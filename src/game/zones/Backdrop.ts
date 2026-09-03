@@ -13,6 +13,7 @@ import {
 import { styleChunk } from '../track/ChunkStyling'
 import { getBuildingTextures } from '../fx/Textures'
 import { getQualityProfile } from '../core/DeviceTier'
+import { Kits } from '../assets/Kits'
 
 /**
  * Distant scenery — the painted-backdrop layer.
@@ -106,6 +107,7 @@ export class Backdrop {
 
     styleChunk(statics, {
       plainMaterials: plain,
+      preShadedMaterials: Kits.materials,
       flatShade: getQualityProfile().flatShade,
       gradient: { bottom: 0.72, top: 1.10 },
     })
@@ -170,6 +172,21 @@ export class Backdrop {
 
   // City: a textured skyline with lit windows.
   private _buildCity(statics: Mesh, plain: Set<Material>): void {
+    if (Kits.isLoaded('city')) {
+      const towers = ['low-detail-building-a', 'low-detail-building-b', 'low-detail-building-c',
+        'low-detail-building-d', 'low-detail-building-e', 'low-detail-building-f']
+      const wide = ['low-detail-building-wide-a', 'low-detail-building-wide-b']
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < 10; i++) {
+          const z = -30 + i * 25 + Math.random() * 8
+          const tall = Math.random() < 0.6
+          const model = tall ? towers[Math.floor(Math.random() * towers.length)] : wide[Math.floor(Math.random() * wide.length)]
+          const scale = tall ? 11 + Math.random() * 9 : 13 + Math.random() * 6
+          Kits.place(statics, model, side * (46 + Math.random() * 60), -1, z, scale, Math.random() < 0.5 ? 0 : Math.PI / 2)
+        }
+      }
+      return
+    }
     const { albedo, emissive } = getBuildingTextures(this.scene)
     const tones = [
       new Color3(0.78, 0.82, 0.90), new Color3(0.90, 0.80, 0.72),
@@ -275,7 +292,7 @@ export class Backdrop {
       const side = i % 2 === 0 ? -1 : 1
       const env = MeshBuilder.CreateSphere('balloon', { diameter: 8, segments: 8 }, this.scene)
       env.scaling.y = 1.2
-      env.position = new Vector3(side * (28 + Math.random() * 30), 26 + Math.random() * 14, 20 + i * 45 + Math.random() * 20)
+      env.position = new Vector3(side * (48 + Math.random() * 34), 30 + Math.random() * 16, 40 + i * 45 + Math.random() * 20)
       env.material = mat; env.parent = node
       const b = MeshBuilder.CreateBox('basket', { width: 2, height: 1.6, depth: 2 }, this.scene)
       b.position = new Vector3(0, -6.2, 0)
