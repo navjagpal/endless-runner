@@ -9,6 +9,7 @@ import {
   Quaternion,
   LoadAssetContainerAsync,
 } from '@babylonjs/core'
+import { PBRCustomMaterial } from '@babylonjs/materials'
 
 /**
  * Model kits — the CC0 Kenney assets built by scripts/build-kits.mjs.
@@ -43,6 +44,9 @@ let _loader: Promise<unknown> | null = null
  * minty teal that reads as a different world from the grass texture the
  * verge is tinted with; the game's greens win.
  */
+/** Materials whose vertices sway in the wind (leaves, not trunks). */
+const SWAY = new Set(['leafsGreen', 'leafsDark'])
+
 const PALETTE: Record<string, Color3> = {
   leafsGreen: new Color3(0.30, 0.74, 0.26),
   leafsDark:  new Color3(0.17, 0.56, 0.22),
@@ -91,6 +95,26 @@ export class Kits {
       // them all plain lit, matte surfaces so they take the zone lighting
       // like everything else on the track.
       for (const m of container.materials) {
+        if (m instanceof PBRMaterial && SWAY.has(m.name)) {
+          // Foliage gets a vertex-shader wind: a slow sway that grows
+          // with height, so canopies move and trunks (another material)
+          // stay put. Positions are world space by the time a chunk is
+          // merged, which is what the phase terms rely on.
+          const sway = new PBRCustomMaterial(`${m.name}_sway`, scene)
+          sway.albedoColor = PALETTE[m.name] ?? m.albedoColor
+          sway.metallic = 0; sway.roughness = 0.9; sway.specularIntensity = 0.3
+          sway.AddUniform('swayTime', 'float', 0)
+          sway.Vertex_Before_PositionUpdated(`
+            float swayK = clamp((positionUpdated.y - 0.8) * 0.3, 0.0, 1.0);
+            positionUpdated.x += sin(swayTime * 1.3 + positionUpdated.z * 0.35 + positionUpdated.x * 0.2) * 0.07 * swayK;
+            positionUpdated.z += cos(swayTime * 1.1 + positionUpdated.x * 0.3) * 0.045 * swayK;
+          `)
+          sway.onBindObservable.add(() => { sway.getEffect()?.setFloat('swayTime', performance.now() / 1000) })
+          for (const mesh of container.meshes) if (mesh.material === m) mesh.material = sway
+          m.dispose()
+          Kits.mats.add(sway)
+          continue
+        }
         if (m instanceof PBRMaterial) {
           m.unlit     = false
           m.metallic  = 0

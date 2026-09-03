@@ -1,6 +1,7 @@
 import {
   type GameSettings, type BestRecord, loadSettings, saveSettings, SPEED_MIN, SPEED_MAX,
 } from './Settings'
+import type { CharacterDef, Roster } from '../player/Characters'
 
 export interface HudExtra {
   multiplier:      number
@@ -35,6 +36,7 @@ function injectCSS(): void {
 
 export class HUD {
   private container:      HTMLDivElement
+  private topBar!:        HTMLDivElement
   private distanceEl:     HTMLSpanElement
   private coinsEl:        HTMLSpanElement
   private coinWrap:       HTMLDivElement
@@ -53,6 +55,13 @@ export class HUD {
   private settingsBtn:    HTMLButtonElement
   private playBtn!:       HTMLButtonElement
   private touchPad:       HTMLDivElement
+  private charName!:      HTMLDivElement
+  private charStatus!:    HTMLDivElement
+  private unlockBtn!:     HTMLButtonElement
+  private bankEl!:        HTMLDivElement
+  private roster:         Roster = { selected: '', bank: 0, unlocked: [] }
+  private characters:     CharacterDef[] = []
+  private viewIndex       = 0
 
   private settings: GameSettings = loadSettings()
   private _openedDuringPlay = false
@@ -64,6 +73,12 @@ export class HUD {
   onResume?:          () => void
   onSettingsChange?:  (s: GameSettings) => void
   onInput?:           (a: InputAction) => void
+  /** Browsing the roster on the start screen — preview this one. */
+  onCharacterChange?: (id: string) => void
+  /** Tap on the unlock / pick button. */
+  onCharacterUnlock?: (id: string) => void
+  /** "Home" from the pause menu — back to the start screen. */
+  onHome?:            () => void
 
   constructor() {
     injectCSS()
@@ -114,6 +129,8 @@ export class HUD {
     this.coinWrap.append(coinIcon, this.coinsEl, this.multEl)
 
     topBar.append(distWrap, divider, this.coinWrap)
+    topBar.style.display = 'none'
+    this.topBar = topBar
     this.container.appendChild(topBar)
 
     // ── Best distance (small, under the top bar) ──────────────────────────
@@ -229,6 +246,7 @@ export class HUD {
   }
   hideStart(): void {
     this.startScreen.style.display = 'none'
+    this.topBar.style.display      = 'flex'
     this.settingsBtn.style.display = 'flex'
     this.pauseBtn.style.display    = 'flex'
     this.starWrap.style.display    = 'flex'
@@ -241,6 +259,59 @@ export class HUD {
     this.playBtn.disabled = !ready
     this.playBtn.textContent = ready ? '▶  Play!' : '⏳  Loading…'
     this.playBtn.style.opacity = ready ? '1' : '0.7'
+  }
+
+  /** The roster to browse; call again whenever the bank or unlocks change. */
+  setRoster(characters: CharacterDef[], roster: Roster): void {
+    this.characters = characters
+    this.roster     = roster
+    const idx = characters.findIndex(c => c.id === roster.selected)
+    if (idx >= 0 && this.viewIndex >= characters.length) this.viewIndex = idx
+    if (!this.characters[this.viewIndex]) this.viewIndex = Math.max(0, idx)
+    this._renderCharacter()
+  }
+
+  /** Character currently shown in the carousel. */
+  get viewedCharacter(): string { return this.characters[this.viewIndex]?.id ?? this.roster.selected }
+
+  private _cycleCharacter(dir: number): void {
+    if (!this.characters.length) return
+    this.viewIndex = (this.viewIndex + dir + this.characters.length) % this.characters.length
+    this._renderCharacter()
+    this.onCharacterChange?.(this.characters[this.viewIndex].id)
+  }
+
+  private _renderCharacter(): void {
+    const c = this.characters[this.viewIndex]
+    if (!c) return
+    const owned    = this.roster.unlocked.includes(c.id)
+    const selected = this.roster.selected === c.id
+    this.charName.textContent = c.name
+    this.bankEl.textContent   = `🪙 ${this.roster.bank}`
+    if (selected) {
+      this.charStatus.textContent = '✓ Ready to run!'
+      this.unlockBtn.style.display = 'none'
+    } else if (owned) {
+      this.charStatus.textContent = 'Unlocked'
+      this.unlockBtn.style.display = 'inline-block'
+      this.unlockBtn.textContent   = `Pick ${c.name}`
+      this.unlockBtn.style.background = 'linear-gradient(135deg,#4ade80,#22d3ee)'
+    } else {
+      const can = this.roster.bank >= c.cost
+      this.charStatus.textContent = can ? `Unlock for 🪙 ${c.cost}` : `🔒 Needs 🪙 ${c.cost}`
+      this.unlockBtn.style.display = 'inline-block'
+      this.unlockBtn.textContent   = can ? `🔓 Unlock for 🪙 ${c.cost}` : `🔒 ${c.cost - this.roster.bank} more coins`
+      this.unlockBtn.style.background = can
+        ? 'linear-gradient(135deg,#fbbf24,#f97316)'
+        : 'linear-gradient(135deg,#94a3b8,#64748b)'
+    }
+  }
+
+  /** Wiggle the unlock button when a kid taps a character they can't afford yet. */
+  shakeUnlock(): void {
+    this.unlockBtn.style.animation = 'none'
+    void this.unlockBtn.offsetWidth
+    this.unlockBtn.style.animation = 'hudShake 0.4s ease'
   }
 
   showPause(): void { this.pauseScreen.style.display = 'flex' }
@@ -364,8 +435,9 @@ export class HUD {
     const screen = document.createElement('div')
     screen.style.cssText = `
       position:absolute;inset:0;display:flex;flex-direction:column;
-      align-items:center;justify-content:center;gap:20px;
-      background:radial-gradient(ellipse at 50% 30%,rgba(90,40,160,0.55) 0%,rgba(20,20,60,0.80) 70%);
+      align-items:center;justify-content:space-between;gap:8px;
+      padding:4vh 0 3vh;
+      background:linear-gradient(180deg,rgba(25,18,70,0.80) 0%,rgba(25,18,70,0.35) 28%,rgba(25,18,70,0.05) 50%,rgba(25,18,70,0.35) 72%,rgba(25,18,70,0.85) 100%);
       pointer-events:all;
     `
 
@@ -418,7 +490,65 @@ export class HUD {
     settingsLink.addEventListener('pointerleave', () => { settingsLink.style.background='rgba(255,255,255,0.12)' })
     settingsLink.addEventListener('pointerup', () => this._openSettings(false))
 
-    screen.append(title, sub, best, playBtn, settingsLink)
+    // ── Character carousel: arrows either side of the orbiting runner ──
+    const carousel = document.createElement('div')
+    carousel.style.cssText = `
+      display:flex; align-items:center; justify-content:space-between;
+      width:min(92vw,720px); pointer-events:none;
+    `
+    const arrow = (label: string, dir: number) => {
+      const b = document.createElement('button')
+      b.className = 'hud-btn'
+      b.style.cssText = `
+        font-family:inherit;font-size:clamp(1.6rem,5vw,2.6rem);font-weight:900;
+        width:min(16vw,84px);height:min(16vw,84px);border-radius:50%;cursor:pointer;
+        background:rgba(255,255,255,0.22);border:3px solid rgba(255,255,255,0.7);color:#fff;
+        box-shadow:0 6px 18px rgba(0,0,0,0.3);pointer-events:all;transition:transform 0.1s;
+      `
+      b.textContent = label
+      b.addEventListener('pointerup', (e) => { e.stopPropagation(); this._cycleCharacter(dir) })
+      return b
+    }
+    const centre = document.createElement('div')
+    centre.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:6px;min-height:150px;justify-content:flex-end;'
+    this.charName = document.createElement('div')
+    this.charName.style.cssText = `
+      font-size:clamp(1.5rem,5.5vw,2.6rem);font-weight:900;color:#fff;
+      text-shadow:0 3px 0 rgba(0,0,0,0.3),0 6px 18px rgba(0,0,0,0.5);
+    `
+    this.charStatus = document.createElement('div')
+    this.charStatus.style.cssText = 'font-size:clamp(0.85rem,2.6vw,1.1rem);font-weight:800;color:rgba(255,255,255,0.9);text-shadow:0 2px 6px rgba(0,0,0,0.5);'
+    this.unlockBtn = document.createElement('button')
+    this.unlockBtn.className = 'hud-btn'
+    this.unlockBtn.style.cssText = `
+      display:none;font-family:inherit;font-size:clamp(0.9rem,2.8vw,1.15rem);font-weight:900;
+      padding:9px 22px;border:3px solid rgba(255,255,255,0.7);border-radius:40px;cursor:pointer;
+      color:#fff;box-shadow:0 6px 18px rgba(0,0,0,0.3);pointer-events:all;
+    `
+    this.unlockBtn.addEventListener('pointerup', (e) => {
+      e.stopPropagation()
+      const c = this.characters[this.viewIndex]
+      if (c) this.onCharacterUnlock?.(c.id)
+    })
+    centre.append(this.charName, this.charStatus, this.unlockBtn)
+    carousel.append(arrow('◀', -1), centre, arrow('▶', 1))
+
+    this.bankEl = document.createElement('div')
+    this.bankEl.style.cssText = `
+      position:absolute;top:14px;right:16px;color:#ffe45c;font-weight:900;
+      font-size:clamp(1rem,3vw,1.3rem);background:rgba(0,0,0,0.3);padding:6px 16px;border-radius:30px;
+      border:2px solid rgba(255,228,92,0.45);
+    `
+    this.bankEl.textContent = '🪙 0'
+
+    const top = document.createElement('div')
+    top.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;'
+    top.append(title, sub)
+    const bottom = document.createElement('div')
+    bottom.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:12px;'
+    bottom.append(best, playBtn, settingsLink)
+
+    screen.append(top, carousel, bottom, this.bankEl)
     return { screen, best }
   }
 
@@ -445,11 +575,16 @@ export class HUD {
     settingsBtn.style.padding  = '12px 44px'
     settingsBtn.addEventListener('pointerup', () => this._openSettings(true))
 
+    const homeBtn = this._actionBtn('🏠  Home', 'linear-gradient(135deg,#f472b6,#fb923c)', 'rgba(251,146,60,0.4)')
+    homeBtn.style.fontSize = 'clamp(0.95rem,2.5vw,1.3rem)'
+    homeBtn.style.padding  = '12px 44px'
+    homeBtn.addEventListener('pointerup', () => this.onHome?.())
+
     const escHint = document.createElement('div')
     escHint.style.cssText = 'color:rgba(255,255,255,0.5);font-size:0.82rem;letter-spacing:1px;'
     escHint.textContent = 'Press ESC to resume'
 
-    screen.append(pauseTitle, resumeBtn, settingsBtn, escHint)
+    screen.append(pauseTitle, resumeBtn, settingsBtn, homeBtn, escHint)
     return screen
   }
 

@@ -36,6 +36,7 @@ const SINK_DEPTH = 90
 interface ZoneSet {
   node:     TransformNode
   animated: { mesh: Mesh; baseY: number; phase: number; rate: number }[]
+  spinners: { node: TransformNode; rate: number }[]
 }
 
 export class Backdrop {
@@ -81,6 +82,7 @@ export class Backdrop {
       for (const a of this.current.animated) {
         a.mesh.position.y = a.baseY + Math.sin(this.time * a.rate + a.phase) * 1.4
       }
+      for (const sp of this.current.spinners) sp.node.rotation.z += sp.rate * dt
     }
   }
 
@@ -95,6 +97,7 @@ export class Backdrop {
     const statics = new Mesh(`backdropStatic_${zoneId}`, this.scene)
     statics.parent = node
     const animated: ZoneSet['animated'] = []
+    const spinners: ZoneSet['spinners'] = []
     const plain = new Set<Material>()
 
     switch (zoneId) {
@@ -102,7 +105,7 @@ export class Backdrop {
       case 'city':   this._buildCity(statics, plain); break
       case 'beach':  this._buildBeach(statics, node, animated, plain); break
       case 'space':  this._buildSpace(statics, node, animated, plain); break
-      default:       this._buildMeadow(statics, node, animated); break
+      default:       this._buildMeadow(statics, node, animated, spinners); break
     }
 
     styleChunk(statics, {
@@ -111,7 +114,7 @@ export class Backdrop {
       flatShade: getQualityProfile().flatShade,
       gradient: { bottom: 0.72, top: 1.10 },
     })
-    s = { node, animated }
+    s = { node, animated, spinners }
     this.sets.set(zoneId, s)
     return s
   }
@@ -132,7 +135,7 @@ export class Backdrop {
   }
 
   // Meadow: two rows of round green hills, hot-air balloons overhead.
-  private _buildMeadow(statics: Mesh, node: TransformNode, animated: ZoneSet['animated']): void {
+  private _buildMeadow(statics: Mesh, node: TransformNode, animated: ZoneSet['animated'], spinners: ZoneSet['spinners']): void {
     const near = this._mat(new Color3(0.40, 0.78, 0.30))
     const far  = this._mat(new Color3(0.52, 0.82, 0.48))
     for (const side of [-1, 1]) {
@@ -143,6 +146,36 @@ export class Backdrop {
       }
     }
     this._balloons(node, animated, 4)
+    this._windmill(statics, node, spinners, 1)
+    this._windmill(statics, node, spinners, -1)
+  }
+
+  /** A turning windmill on the hillside — the one thing a kid always points at. */
+  private _windmill(statics: Mesh, node: TransformNode, spinners: ZoneSet['spinners'], side: number): void {
+    const x = side * 62, z = side > 0 ? 95 : 150
+    const wall = this._mat(new Color3(0.96, 0.94, 0.86))
+    const roof = this._mat(new Color3(0.80, 0.30, 0.25))
+    const wood = this._mat(new Color3(0.55, 0.38, 0.22))
+    const tower = MeshBuilder.CreateCylinder('mill', { height: 15, diameterBottom: 5.5, diameterTop: 3.6, tessellation: 8 }, this.scene)
+    tower.position = new Vector3(x, 7.5 - 0.5, z); tower.material = wall; tower.parent = statics
+    const cap = MeshBuilder.CreateCylinder('millRoof', { height: 3.2, diameterBottom: 4.4, diameterTop: 0.6, tessellation: 8 }, this.scene)
+    cap.position = new Vector3(x, 15.6, z); cap.material = roof; cap.parent = statics
+
+    // Hub faces the road, blades in its local x/y plane spinning about z.
+    const hub = new TransformNode('millHub', this.scene)
+    hub.parent = node
+    hub.position = new Vector3(x - side * 2.4, 13.2, z - 1.2)
+    hub.rotation.y = -side * Math.PI * 0.42
+    for (let i = 0; i < 4; i++) {
+      const blade = MeshBuilder.CreateBox('blade', { width: 1.4, height: 7.5, depth: 0.25 }, this.scene)
+      blade.position = new Vector3(0, 3.6, 0)
+      blade.material = wood
+      const arm = new TransformNode('arm', this.scene)
+      arm.parent = hub
+      arm.rotation.z = i * Math.PI / 2
+      blade.parent = arm
+    }
+    spinners.push({ node: hub, rate: 0.7 })
   }
 
   // Forest: snow-capped mountains behind a band of dark pine hills.

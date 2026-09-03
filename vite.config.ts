@@ -30,8 +30,16 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,glb,gltf}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,glb,gltf,ogg}'],
+        // Twelve characters at ~150 KB each: the chosen one is fetched on
+        // demand and kept in a runtime cache rather than precached.
+        globIgnores: ['**/models/characters/**'],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,  // 8 MB — Babylon.js bundle is ~5 MB
+        runtimeCaching: [{
+          urlPattern: /\/models\/characters\/[^/]+\.glb$/,
+          handler: 'CacheFirst',
+          options: { cacheName: 'characters', expiration: { maxEntries: 16 } },
+        }],
       },
     }),
   ],

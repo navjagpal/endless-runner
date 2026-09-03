@@ -19,6 +19,13 @@ A high-quality 3D endless runner PWA built with Babylon.js — inspired by Subwa
 - **Animated character** — rigged run/jump, procedural slide and stumble, dust at the heels
 - **Coin collection** with sparkles, coin arcs over barriers, low coins under gantries
 - **Milestone celebrations** and zone-change confetti; persistent best distance with "New Best!"
+- **Character select** — twelve Kenney chibis on the start screen, unlocked with the coin bank
+  (every coin ever collected; bumps never take from it), previewed live by an orbiting camera
+- **Rolling hills** — the road rises and falls (visually only; the lanes and jump rules stay flat)
+- **Ambient life** — swaying foliage, flocks of birds, meadow butterflies, drifting petals and
+  leaves, a turning windmill, bobbing hot-air balloons
+- **Real sound effects** from Kenney's CC0 audio packs (impacts, coin tings, power-up sweeps,
+  pizzicato jingles), with the old synthesised beeps as fallback; music is still procedural
 - **Big on-screen buttons** for touch devices (toggle in settings)
 - **Pause menu** — tap the ⏸ button or press `Esc`
 - **Procedural audio** — zone-specific music and sound effects via Web Audio API
@@ -83,12 +90,21 @@ and the chunk is merged per material, so a chunk full of models costs the
 same few draw calls as the old primitives. If a kit fails to load, the
 original procedural primitives are used instead.
 
-## The character model
+## The characters
 
-The runner at `public/models/runner.glb` is a Kenney Mini Character (CC0,
-skinned chibi with `sprint`, `jump` and `crouch` clips). See
-`public/models/CREDITS.md`; pick a different one by changing `HERO` in
-`scripts/build-kits.mjs`.
+The twelve runners in `public/models/characters/` are Kenney Mini
+Characters (CC0, skinned chibis with `sprint`, `jump` and `crouch` clips).
+Only the selected one is fetched, and it is cached at runtime by the
+service worker rather than precached. Names and unlock costs live in
+`src/game/player/Characters.ts`; see `public/models/CREDITS.md`.
+
+## Sound
+
+`public/audio/` holds the effects, copied from Kenney's Impact, Interface,
+Digital, Casino and Music Jingles packs by the same build script (the
+mapping is the `SOUNDS` table in `scripts/build-kits.mjs`). The
+`AudioManager` decodes them on first use and falls back to its synthesised
+versions for anything missing.
 
 There is also a fully procedural character built from primitives, used
 automatically whenever the GLB is missing or fails to parse. It's a real

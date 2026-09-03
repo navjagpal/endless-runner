@@ -11,6 +11,7 @@ import {
   type Mesh,
 } from '@babylonjs/core'
 import { getQualityProfile, type QualityProfile } from './DeviceTier'
+import { terrainY } from '../track/Terrain'
 
 const LAMP_SPACING = 15     // must match TrackChunk lamp spacing
 const LAMP_SIDE_X  = [5.5, -5.5, 5.5, -5.5, 5.5, -5.5]
@@ -139,11 +140,8 @@ export class GameEngine {
   updateLampLights(playerZ: number): void {
     const baseZ = Math.floor(playerZ / LAMP_SPACING) * LAMP_SPACING
     for (let i = 0; i < this.lampLights.length; i++) {
-      this.lampLights[i].position.set(
-        LAMP_SIDE_X[i],
-        3.85,
-        baseZ + LAMP_Z_OFFSET[i],
-      )
+      const z = baseZ + LAMP_Z_OFFSET[i]
+      this.lampLights[i].position.set(LAMP_SIDE_X[i], 3.85 + terrainY(z), z)
     }
   }
 

@@ -14,6 +14,9 @@ import { Backdrop }            from './zones/Backdrop'
 import { CelebrationManager }  from './ui/CelebrationManager'
 import { HUD }                 from './ui/HUD'
 import { Kits }                from './assets/Kits'
+import { Ambient }             from './fx/Ambient'
+import { terrainY }            from './track/Terrain'
+import { CHARACTERS, loadRoster, saveRoster, type Roster } from './player/Characters'
 import {
   type GameSettings, SPEED_MIN, SPEED_MAX, KID_SPEED_MAX, loadBest, saveBest, type BestRecord,
 } from './ui/Settings'
@@ -66,7 +69,9 @@ export class Game {
   private track!:       TrackManager
   private obstacles!:   ObstacleManager
   private zones:        ZoneManager | null = null
+  private ambient!:     Ambient
   private ready         = false
+  private roster:       Roster
   private backdrop:     Backdrop
   private celebrations: CelebrationManager | null = null
   private hud:          HUD
@@ -114,8 +119,9 @@ export class Game {
     const env = setupEnvironment(scene)
     this.clouds    = env.clouds
     this.farGround = env.farGround
+    this.roster    = loadRoster()
 
-    this.player    = new Player(scene, this.engine)
+    this.player    = new Player(scene, this.engine, this.roster.selected)
     this.camera    = new FollowCamera(scene)
     this.audio     = new AudioManager()
     this.hud       = new HUD()
@@ -135,6 +141,14 @@ export class Game {
       else this.player.slide()
     }
     this.hud.setTouchButtons(this.settings.touchButtons)
+
+    // Start screen: the camera orbits the runner and the carousel swaps it.
+    this.camera.setShowcase(true)
+    this.hud.setRoster(CHARACTERS, this.roster)
+    this.hud.onCharacterChange = (id) => { this.audio.playClick(); void this.player.setCharacter(id) }
+    this.hud.onCharacterUnlock = (id) => this._unlockCharacter(id)
+    this.hud.onHome = () => { this._saveBest(); location.reload() }
+    void this.audio.preload()
 
     this.hud.onPlay   = () => this._startRun()
     this.hud.onPause  = () => this._pause()
@@ -173,6 +187,7 @@ export class Game {
 
     this.track     = new TrackManager(scene, devDist)
     this.obstacles = new ObstacleManager(scene)
+    this.ambient   = new Ambient(scene)
 
     this.zones = new ZoneManager(
       scene,
@@ -188,6 +203,7 @@ export class Game {
     this.zones.setBrightMode(this.settings.brightZones)
 
     this.zones.onZoneEntered = (zone) => {
+      this.ambient.setZone(zone.id)
       this.audio.setZone(zone.id)
       this.audio.playCelebration()
       this.celebrations?.celebrateZone(zone)
@@ -207,7 +223,7 @@ export class Game {
 
     if (q.has('auto') || q.has('sim')) {
       this._startRun()
-      if (devDist > 0) { this.totalDistance = devDist; this.zones!.snap(devDist) }
+      if (devDist > 0) { this.totalDistance = devDist; this.zones!.snap(devDist); this.ambient.setZone(this.zones!.currentZone.id) }
       if (q.has('star')) this._startStarPower()
       const simSecs = Number(q.get('sim')) || 0
       if (simSecs > 0) this._simulate(simSecs)
@@ -242,8 +258,32 @@ export class Game {
   private _baseSpeed(): number { return this.settings.kidMode ? KID_BASE_SPEED : BASE_SPEED }
   private _maxSpeed():  number { return this.settings.kidMode ? KID_SPEED_MAX  : SPEED_MAX }
 
+  private _unlockCharacter(id: string): void {
+    const def = CHARACTERS.find(c => c.id === id)
+    if (!def) return
+    const owned = this.roster.unlocked.includes(id)
+    if (!owned) {
+      if (this.roster.bank < def.cost) {
+        this.audio.playLocked()
+        this.hud.shakeUnlock()
+        return
+      }
+      this.roster.bank -= def.cost
+      this.roster.unlocked.push(id)
+      this.celebrations?.burst(1.5)
+    }
+    this.roster.selected = id
+    saveRoster(this.roster)
+    this.audio.playSelect()
+    this.hud.setRoster(CHARACTERS, this.roster)
+    void this.player.setCharacter(id)
+  }
+
   private _startRun(): void {
     if (!this.ready) return
+    this.camera.setShowcase(false)
+    // Browsing a locked character doesn't let you run as it.
+    void this.player.setCharacter(this.roster.selected)
     this.audio.resume()
     this.audio.startMusic()
     this.running       = true
@@ -297,6 +337,7 @@ export class Game {
     if (loss > 0) {
       this.coins -= loss
       this.obstacles.spillCoins(Math.min(loss, 8), this.player.position)
+      this.audio.playSpill()
       this.hud.flashCoins()
     }
 
@@ -315,6 +356,7 @@ export class Game {
     void pos
     this.statCoins  += 1
     this.coins      += this.multiplier
+    this.roster.bank += this.multiplier
     this.coinStreak += 1
     this.player.triggerCoinEffect()
     this.audio.playCoin(Math.min(7, Math.floor(this.coinStreak / 4)))
@@ -390,12 +432,22 @@ export class Game {
     if (this.coins > this.best.coins) this.best.coins = this.coins
   }
 
-  private _saveBest(): void { saveBest(this.best) }
+  private _saveBest(): void { saveBest(this.best); saveRoster(this.roster) }
 
   // ─── Frame ──────────────────────────────────────────────────────────
 
   private _tick(): void {
-    this._step(Math.min(this.engine.deltaTime, 0.05))
+    const dt = Math.min(this.engine.deltaTime, 0.05)
+    if (this.ready && !this.running) {
+      // Start screen: the runner jogs on the spot while the camera orbits.
+      this.player.update(dt, 0, 0)
+      this.camera.update(this.player.position, dt, 0, 0, terrainY(this.player.position.z))
+      this.ambient.update(this.player.position, dt)
+      this.clouds.update(this.player.position.z, dt)
+      this.backdrop.update(this.player.position.z, dt)
+      return
+    }
+    this._step(dt)
   }
 
   private _step(rawDt: number): void {
@@ -405,7 +457,7 @@ export class Game {
     // camera still updates so the shake reads during the freeze.
     if (this.hitStopTimer > 0) {
       this.hitStopTimer -= rawDt
-      this.camera.update(this.player.position, rawDt, this._speedFrac(), 0)
+      this.camera.update(this.player.position, rawDt, this._speedFrac(), 0, terrainY(this.player.position.z))
       return
     }
     const dt = rawDt
@@ -455,7 +507,8 @@ export class Game {
     )
     this.player.setMagnet(this.obstacles.magnetActive)
 
-    this.camera.update(this.player.position, dt, speedFrac, this.player.lateralVelocity)
+    this.camera.update(this.player.position, dt, speedFrac, this.player.lateralVelocity, terrainY(this.player.position.z))
+    this.ambient.update(this.player.position, dt)
     this.engine.updateLampLights(this.player.position.z)
     this.clouds.update(this.player.position.z, dt)
     this.backdrop.update(this.player.position.z, dt)

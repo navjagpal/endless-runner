@@ -60,16 +60,76 @@ const PACKS = {
     url:  'https://kenney.nl/media/pages/assets/mini-characters/bfc7e272b4-1774770718/kenney_mini-characters.zip',
     dir:  'Models/GLB format',
   },
+  // Audio
+  impact: {
+    page: 'https://kenney.nl/assets/impact-sounds',
+    url:  'https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip',
+    dir:  'Audio',
+  },
+  interface: {
+    page: 'https://kenney.nl/assets/interface-sounds',
+    url:  'https://kenney.nl/media/pages/assets/interface-sounds/fa43c1dd4d-1677589452/kenney_interface-sounds.zip',
+    dir:  'Audio',
+  },
+  jingles: {
+    page: 'https://kenney.nl/assets/music-jingles',
+    url:  'https://kenney.nl/media/pages/assets/music-jingles/f37e530b9e-1677590399/kenney_music-jingles.zip',
+    dir:  'Audio',
+  },
+  digital: {
+    page: 'https://kenney.nl/assets/digital-audio',
+    url:  'https://kenney.nl/media/pages/assets/digital-audio/216eac4753-1677590265/kenney_digital-audio.zip',
+    dir:  'Audio',
+  },
+  casino: {
+    page: 'https://kenney.nl/assets/casino-audio',
+    url:  'https://kenney.nl/media/pages/assets/casino-audio/2472606a04-1721639069/kenney_casino-audio.zip',
+    dir:  'Audio',
+  },
 }
 
 /**
- * The playable character: a skinned chibi from Kenney's Mini Characters
- * with sprint, jump, fall and crouch clips — so running, jumping and
- * sliding are all real animation. Kept un-joined and un-quantized so the
- * skin and clips survive untouched. Any other `character-*` in the pack
- * (or the rigid Blocky Characters pack) drops in here.
+ * Sound effects: game name → pack + file. Everything the game plays is
+ * copied to public/audio/<name>.ogg; AudioManager falls back to its old
+ * synthesised beeps for any file that fails to load.
  */
-const HERO = { pack: 'mini', model: 'character-female-b' }
+const SOUNDS = {
+  coin:      ['interface', 'glass_002.ogg'],
+  jump:      ['digital',   'phaseJump1.ogg'],
+  bump:      ['impact',    'impactSoft_heavy_001.ogg'],
+  spill:     ['casino',    'chips-collide-2.ogg'],
+  star:      ['digital',   'powerUp7.ogg'],
+  magnet:    ['digital',   'powerUp2.ogg'],
+  streak:    ['interface', 'confirmation_002.ogg'],
+  whee:      ['digital',   'phaserUp5.ogg'],
+  best:      ['jingles',   'Pizzicato jingles/jingles_PIZZI03.ogg'],
+  zone:      ['jingles',   'Pizzicato jingles/jingles_PIZZI01.ogg'],
+  starJingle:['jingles',   'Pizzicato jingles/jingles_PIZZI04.ogg'],
+  click:     ['interface', 'click_001.ogg'],
+  select:    ['interface', 'confirmation_003.ogg'],
+  locked:    ['interface', 'error_004.ogg'],
+  land:      ['impact',    'footstep_concrete_002.ogg'],
+  step:      ['impact',    'footstep_concrete_000.ogg'],
+}
+
+/**
+ * The playable characters: every skinned chibi in Kenney's Mini
+ * Characters pack, each with sprint, jump, fall and crouch clips — so
+ * running, jumping and sliding are all real animation. Kept un-joined
+ * and un-quantized so the skins and clips survive untouched. Written one
+ * file each to public/models/characters/ so the game only fetches the
+ * one that's selected. The roster (names, unlock costs) lives in
+ * src/game/player/Characters.ts.
+ */
+const CHARACTERS = {
+  pack: 'mini',
+  models: [
+    'character-female-a', 'character-female-b', 'character-female-c',
+    'character-female-d', 'character-female-e', 'character-female-f',
+    'character-male-a', 'character-male-b', 'character-male-c',
+    'character-male-d', 'character-male-e', 'character-male-f',
+  ],
+}
 
 // Which models each kit ships. Keep this tight: every entry is bytes the
 // tablet downloads before the first run.
@@ -165,18 +225,48 @@ async function buildKit(kitName, kit) {
   console.log(`${kitName}.glb: ${kit.models.length} models, ${kb} KB`)
 }
 
-async function buildHero() {
-  const srcDir = await fetchPack(HERO.pack)
-  const doc = await io.read(join(srcDir, `${HERO.model}.glb`))
-  await doc.transform(dedup(), prune(), unpartition())
-  const file = join(root, 'public', 'models', 'runner.glb')
-  await io.write(file, doc)
-  const clips = doc.getRoot().listAnimations().map(a => a.getName()).join(', ')
-  console.log(`runner.glb (${HERO.model}): ${(readFileSync(file).length / 1024).toFixed(0)} KB, clips: ${clips}`)
+async function buildCharacters() {
+  const srcDir = await fetchPack(CHARACTERS.pack)
+  const dir = join(root, 'public', 'models', 'characters')
+  mkdirSync(dir, { recursive: true })
+  let total = 0
+  for (const model of CHARACTERS.models) {
+    const doc = await io.read(join(srcDir, `${model}.glb`))
+    await doc.transform(dedup(), prune(), unpartition())
+    const file = join(dir, `${model.replace('character-', '')}.glb`)
+    await io.write(file, doc)
+    total += readFileSync(file).length
+  }
+  console.log(`characters: ${CHARACTERS.models.length} files, ${(total / 1024).toFixed(0)} KB total`)
+  // The old single-hero file, if present from an earlier build.
+  const legacy = join(root, 'public', 'models', 'runner.glb')
+  if (existsSync(legacy)) rmSync(legacy)
+}
+
+async function buildSounds() {
+  const dir = join(root, 'public', 'audio')
+  mkdirSync(dir, { recursive: true })
+  let total = 0
+  for (const [name, [pack, file]] of Object.entries(SOUNDS)) {
+    const srcDir = await fetchPack(pack)
+    const src = join(srcDir, file)
+    if (!existsSync(src)) { console.warn(`  missing sound ${src}`); continue }
+    const bytes = readFileSync(src)
+    writeFileSync(join(dir, `${name}.ogg`), bytes)
+    total += bytes.length
+  }
+  console.log(`audio: ${Object.keys(SOUNDS).length} files, ${(total / 1024).toFixed(0)} KB total`)
+  writeFileSync(join(dir, 'CREDITS.md'), `# Sound effects
+
+All from [Kenney](https://kenney.nl) audio packs, **CC0 1.0** (public domain):
+Impact Sounds, Interface Sounds, Music Jingles, Digital Audio, Casino Audio.
+Copied by \`scripts/build-kits.mjs\`; the mapping is the SOUNDS table there.
+`)
 }
 
 for (const [name, kit] of Object.entries(KITS)) await buildKit(name, kit)
-await buildHero()
+await buildCharacters()
+await buildSounds()
 
 writeFileSync(join(out, 'CREDITS.md'), `# Model kits
 
@@ -186,9 +276,9 @@ all **CC0 1.0** (public domain — no attribution required, credited anyway):
 - Car Kit — ${PACKS.car.page}
 - Nature Kit — ${PACKS.nature.page}
 - City Kit (Commercial) — ${PACKS.city.page}
-- Mini Characters (the runner, \`public/models/runner.glb\`) — ${PACKS.mini.page}
+- Mini Characters (the runners, \`public/models/characters/\`) — ${PACKS.mini.page}
 
 Do not edit the .glb files by hand; change the model lists in the script
 and rebuild with \`npm run assets:kits\`.
 `)
-void basename; void rmSync
+void basename

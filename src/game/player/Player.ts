@@ -19,6 +19,8 @@ import {
   getBlobShadowTexture, getSoftDiscTexture, getSparkleTexture, getRainbowTexture,
 } from '../fx/Textures'
 import { getQualityProfile } from '../core/DeviceTier'
+import { terrainY } from '../track/Terrain'
+import { characterUrl } from './Characters'
 
 /**
  * Jump apex, and it's a balance point rather than a feel knob.
@@ -68,6 +70,8 @@ export class Player {
   private engine: GameEngine
   private character: Character
   private charAnchor: TransformNode
+  private characterId = ''
+  private charToken = 0
 
   private state: CharacterState = 'running'
   private targetLane = 1
@@ -101,7 +105,7 @@ export class Player {
   private magnetRing: Mesh
   private fxTime = 0
 
-  constructor(scene: Scene, engine: GameEngine) {
+  constructor(scene: Scene, engine: GameEngine, characterId: string) {
     this.scene  = scene
     this.engine = engine
     this.laneX  = LANE_POSITIONS[1]
@@ -124,10 +128,10 @@ export class Player {
     this.character = procedural
     this._registerShadowCasters(procedural.castingMeshes)
 
-    // Try to upgrade to a skinned rig in the background. Loading it
-    // synchronously would stall the start screen for no reason — the
-    // procedural character is a perfectly good first frame.
-    void this._tryUpgradeToRig()
+    // Load the chosen rig in the background. Loading it synchronously
+    // would stall the start screen for no reason — the procedural
+    // character is a perfectly good first frame.
+    void this.setCharacter(characterId)
 
     this.blobShadow   = this._makeBlobShadow(scene)
     this.bumpPs       = this._makeBumpParticles(scene)
@@ -138,13 +142,24 @@ export class Player {
     this.magnetRing   = this._makeMagnetRing(scene)
   }
 
-  private async _tryUpgradeToRig(): Promise<void> {
-    const rig = await CharacterRig.tryLoad(this.scene, this.charAnchor)
+  /**
+   * Swaps the visual to another roster character. The old one stays on
+   * screen until the new one has loaded and compiled, and a newer
+   * request supersedes an older one still in flight.
+   */
+  async setCharacter(id: string): Promise<void> {
+    if (id === this.characterId) return
+    this.characterId = id
+    const token = ++this.charToken
+    const rig = await CharacterRig.tryLoad(this.scene, this.charAnchor, characterUrl(id))
     if (!rig) return
+    if (token !== this.charToken) { rig.dispose(); return }
     this.character.dispose()
     this.character = rig
     this._registerShadowCasters(rig.castingMeshes)
   }
+
+  get currentCharacter(): string { return this.characterId }
 
   private _registerShadowCasters(meshes: { getTotalVertices(): number }[]): void {
     if (!this.engine.shadowGenerator) return
@@ -285,11 +300,13 @@ export class Player {
     this._updateVertical(dt)
 
     this.mesh.position.x  = this.laneX
-    this.mesh.position.y  = 0.75 + this.posY
     this.mesh.position.z += runSpeed * dt
+    // Feet on the flat track plane, then the whole thing lifted onto the
+    // hill at this z — the same lift the chunks and obstacles got.
+    this.mesh.position.y  = 0.75 + this.posY + terrainY(this.mesh.position.z)
 
     this._updateBlobShadow()
-    this._updateFx(dt, speedFrac)
+    this._updateFx(dt, speedFrac, runSpeed)
 
     this.character.update(dt, this.state, {
       speed: runSpeed,
@@ -358,21 +375,22 @@ export class Player {
 
   private _updateBlobShadow(): void {
     const h = Math.max(0, this.posY - this.groundY)
-    this.blobShadow.position.set(this.laneX, this.groundY + 0.02, this.mesh.position.z)
+    this.blobShadow.position.set(this.laneX, this.groundY + 0.02 + terrainY(this.mesh.position.z), this.mesh.position.z)
     const k = Math.max(0.45, 1 - h / (JUMP_HEIGHT * 1.6))
     this.blobShadow.scaling.set(k, 1, k)
     this.blobShadow.visibility = 0.15 + 0.85 * k
   }
 
-  private _updateFx(dt: number, speedFrac: number): void {
-    // Dust only while the feet are on a surface.
-    this.dustPs.emitRate = this.airborne ? 0 : 14 + speedFrac * 30
+  private _updateFx(dt: number, speedFrac: number, runSpeed: number): void {
+    // Dust only while the feet are on a surface and actually moving.
+    this.dustPs.emitRate = this.airborne || runSpeed <= 0 ? 0 : 14 + speedFrac * 30
 
-    const feetY = this.posY
-    this.rainbowTrail.position.set(this.laneX, feetY + 0.06, this.mesh.position.z - 2.4)
+    const z = this.mesh.position.z
+    const feetY = this.posY + terrainY(z)
+    this.rainbowTrail.position.set(this.laneX, this.posY + 0.06 + terrainY(z - 2.4), z - 2.4)
     this.rainbowTrail.scaling.x = 0.9 + Math.sin(this.fxTime * 9) * 0.12
 
-    this.magnetRing.position.set(this.laneX, feetY + 0.9, this.mesh.position.z)
+    this.magnetRing.position.set(this.laneX, feetY + 0.9, z)
     this.magnetRing.rotation.y += dt * 2.5
     this.magnetRing.rotation.x = Math.PI / 2 + Math.sin(this.fxTime * 3) * 0.35
     void dt
