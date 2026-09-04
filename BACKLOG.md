@@ -25,7 +25,7 @@ makes Subway Surfers feel exciting.
       back. The player can run the full length up top.
 - [ ] **Rainbow bridges / arches** — Decorative curved overpasses the player
       runs under.
-- [ ] **Hills & dips** — Gentle rolling terrain rather than a flat road.
+- [x] **Hills & dips** — Rolling hills (visual; gameplay stays flat). No dips: the far ground would show.
 - [ ] **Tunnels with glowing lights** — Brief enclosed sections that feel cozy,
       not scary.
 - [ ] **Banked / curving road** — Road visually curves left/right even though
@@ -33,9 +33,8 @@ makes Subway Surfers feel exciting.
 
 ## 🦸 2. Character & Customization
 
-- [ ] **Animal characters** — Unlockable bunny, kitten, puppy, unicorn,
-      dinosaur.
-- [ ] **Coin-purchased outfits** — Hats, capes, tutus, fairy wings.
+- [~] **Characters** — Twelve Kenney chibis, unlockable with the coin bank. Animals would need another pack.
+- [~] **Coin-purchased characters** — Done for whole characters; outfits not yet.
 - [ ] **Pet companion** — A small dog/cat that runs alongside the player.
 - [ ] **Nameable character** — Personal touch.
 
@@ -56,8 +55,8 @@ makes Subway Surfers feel exciting.
 
 ## 🎨 5. Environment Polish
 
-- [ ] **Friendly animals in scenery** — Bunnies, dolphins, astronauts.
-- [ ] **Weather events** — Rainbow after rain, snowflakes, cherry blossoms.
+- [~] **Friendly animals in scenery** — Birds and butterflies; no ground animals yet.
+- [~] **Weather events** — Drifting petals (meadow), leaves (forest), sparkles (space).
 - [ ] **Candy-land biome** — Lollipops, gingerbread road, marshmallow clouds.
 - [ ] **Underwater biome** — Soft blue filter, bubbles, fish.
 - [~] **Animated billboards** — City billboards have smiley faces (static).

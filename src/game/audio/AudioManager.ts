@@ -42,8 +42,17 @@ const ZONE_MUSIC: Record<string, ZoneMusic> = {
 
 // ─── AudioManager ─────────────────────────────────────────────────────────────
 
+/** Files under public/audio/, copied from Kenney's CC0 packs by scripts/build-kits.mjs. */
+const SAMPLES = [
+  'coin', 'jump', 'bump', 'spill', 'star', 'magnet', 'streak', 'whee', 'best', 'zone',
+  'starJingle', 'click', 'select', 'locked', 'land', 'step',
+] as const
+type SampleName = typeof SAMPLES[number]
+
 export class AudioManager {
   private ctx: AudioContext | null = null
+  private buffers = new Map<SampleName, AudioBuffer>()
+  private preloaded = false
   private _musicRunning = false
   private _currentZone  = 'meadow'
   private _targetZone   = 'meadow'
@@ -51,8 +60,49 @@ export class AudioManager {
   private _musicGain!:  GainNode
   private _nextBar      = 0
 
-  resume():  void { this._ctx().resume() }
+  resume():  void { this._ctx().resume(); void this.preload() }
   suspend(): void { this.ctx?.suspend() }
+
+  /**
+   * Fetch and decode the sample set. Safe to call early — decoding
+   * doesn't need a user gesture, only playback does — and every play*
+   * method falls back to its synthesised version until the sample is in.
+   */
+  async preload(): Promise<void> {
+    if (this.preloaded) return
+    this.preloaded = true
+    const ctx = this._ctx()
+    await Promise.all(SAMPLES.map(async name => {
+      try {
+        const res = await fetch(`${import.meta.env.BASE_URL}audio/${name}.ogg`)
+        if (!res.ok) return
+        const buf = await ctx.decodeAudioData(await res.arrayBuffer())
+        this.buffers.set(name, buf)
+      } catch { /* keep the synth fallback */ }
+    }))
+  }
+
+  /** Plays a sample; returns false when it isn't loaded so the caller can synthesise. */
+  private _play(name: SampleName, gain = 1, rate = 1, delay = 0): boolean {
+    const buf = this.buffers.get(name)
+    if (!buf) return false
+    const ctx = this._ctx()
+    const src = ctx.createBufferSource()
+    src.buffer = buf
+    src.playbackRate.value = rate
+    const g = ctx.createGain()
+    g.gain.value = gain
+    src.connect(g); g.connect(this._masterGain)
+    src.start(ctx.currentTime + delay)
+    return true
+  }
+
+  // UI
+  playClick():  void { this._play('click', 0.5) }
+  playSelect(): void { this._play('select', 0.7) }
+  playLocked(): void { this._play('locked', 0.6) }
+  playSpill():  void { this._play('spill', 0.6) }
+  playLand():   void { this._play('land', 0.35, 0.9 + Math.random() * 0.2) }
 
   // ─── Zone crossfade ──────────────────────────────────────────────────────
 
@@ -65,6 +115,7 @@ export class AudioManager {
   // ─── SFX ─────────────────────────────────────────────────────────────────
 
   playJump(): void {
+    if (this._play('jump', 0.45, 1.05)) return
     const ctx = this._ctx()
     const osc = ctx.createOscillator(); const g = ctx.createGain()
     osc.connect(g); g.connect(this._masterGain)
@@ -81,6 +132,7 @@ export class AudioManager {
    * literally sounds higher and brighter — the reward is audible.
    */
   playCoin(level = 0): void {
+    if (this._play('coin', 0.5, Math.pow(2, Math.min(level, 7) / 12))) return
     const ctx   = this._ctx()
     const base  = 880 * Math.pow(2, Math.min(level, 7) / 12)
     const freqs = [base, base * 1.25, base * 1.5]
@@ -98,6 +150,7 @@ export class AudioManager {
 
   /** A soft cartoon "boing" rather than a harsh buzz — it's a kids' game. */
   playBump(): void {
+    if (this._play('bump', 0.8, 0.95)) return
     const ctx = this._ctx()
     const osc = ctx.createOscillator(); const g = ctx.createGain()
     osc.connect(g); g.connect(this._masterGain)
@@ -112,6 +165,7 @@ export class AudioManager {
 
   /** Rising arpeggio when the star meter fills. */
   playStar(): void {
+    if (this._play('star', 0.7) && this._play('starJingle', 0.5, 1, 0.15)) return
     const ctx   = this._ctx()
     const freqs = [523, 659, 784, 1047, 1319, 1568, 2093]
     freqs.forEach((f, i) => {
@@ -127,6 +181,7 @@ export class AudioManager {
   }
 
   playMagnet(): void {
+    if (this._play('magnet', 0.6)) return
     const ctx = this._ctx()
     const osc = ctx.createOscillator(); const g = ctx.createGain()
     osc.connect(g); g.connect(this._masterGain)
@@ -140,6 +195,7 @@ export class AudioManager {
 
   /** Streak / multiplier fanfare; `level` picks how many notes. */
   playStreak(level: number): void {
+    if (this._play('streak', 0.6, 1 + Math.min(4, level) * 0.06)) return
     const ctx   = this._ctx()
     const count = 2 + Math.min(4, Math.round(level))
     for (let i = 0; i < count; i++) {
@@ -156,6 +212,7 @@ export class AudioManager {
 
   /** A swoopy "wheee" for ramps and rooftops. */
   playWhee(): void {
+    if (this._play('whee', 0.6)) return
     const ctx = this._ctx()
     const osc = ctx.createOscillator(); const g = ctx.createGain()
     osc.connect(g); g.connect(this._masterGain)
@@ -169,6 +226,7 @@ export class AudioManager {
   }
 
   playBest(): void {
+    if (this._play('best', 0.7)) return
     const ctx   = this._ctx()
     const freqs = [784, 784, 784, 1047, 1319]
     const gaps  = [0, 0.12, 0.24, 0.36, 0.60]
@@ -186,6 +244,7 @@ export class AudioManager {
   }
 
   playCelebration(): void {
+    if (this._play('zone', 0.6)) return
     const ctx   = this._ctx()
     const freqs = [523, 659, 784, 1047, 1318]
     freqs.forEach((f, i) => {
@@ -209,7 +268,7 @@ export class AudioManager {
     const ctx         = this._ctx()
 
     this._musicGain   = ctx.createGain()
-    this._musicGain.gain.value = 0.55
+    this._musicGain.gain.value = 0.42
     this._musicGain.connect(this._masterGain)
 
     this._nextBar = ctx.currentTime + 0.05

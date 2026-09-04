@@ -29,8 +29,6 @@ import type { Character, CharacterContext, CharacterState } from './Character'
  * instead of failing.
  */
 
-const MODEL_URL = `${import.meta.env.BASE_URL}models/runner.glb`
-
 /** "glTF" as a little-endian uint32 — the first four bytes of every GLB. */
 const GLB_MAGIC = 0x46546c67
 
@@ -147,7 +145,7 @@ export class CharacterRig implements Character {
    * the file fails to parse — the caller falls back to the procedural
    * character, so a missing asset degrades rather than breaks.
    */
-  static async tryLoad(scene: Scene, parent: TransformNode): Promise<CharacterRig | null> {
+  static async tryLoad(scene: Scene, parent: TransformNode, url: string): Promise<CharacterRig | null> {
     try {
       // A 200 is not proof of a model. Vite's dev server and most static
       // hosts fall back to index.html for unknown paths, so a HEAD check
@@ -155,15 +153,15 @@ export class CharacterRig implements Character {
       // first four bytes being "<!do". Verify the glTF magic ourselves
       // and treat anything else as "no model present", which is an
       // expected state here rather than an error.
-      const res = await fetch(MODEL_URL)
+      const res = await fetch(url)
       if (!res.ok) {
-        console.info('[rig] no runner.glb — using procedural character')
+        console.info(`[rig] no model at ${url} — using procedural character`)
         return null
       }
 
       const buffer = await res.arrayBuffer()
       if (buffer.byteLength < 4 || new DataView(buffer).getUint32(0, true) !== GLB_MAGIC) {
-        console.info('[rig] runner.glb is not a GLB (server likely served HTML) — using procedural character')
+        console.info(`[rig] ${url} is not a GLB (server likely served HTML) — using procedural character`)
         return null
       }
 
@@ -174,7 +172,7 @@ export class CharacterRig implements Character {
       await import('@babylonjs/loaders/glTF')
 
       // Load from the bytes already in hand rather than re-fetching.
-      const file = new File([buffer], 'runner.glb')
+      const file = new File([buffer], url.split('/').pop() || 'runner.glb')
       const container = await LoadAssetContainerAsync(file, scene)
       container.addAllToScene()
 
@@ -207,7 +205,7 @@ export class CharacterRig implements Character {
         (n): n is TransformNode => n instanceof TransformNode,
       )
       if (!rootNodes.length) {
-        console.warn('[rig] runner.glb has no root nodes — using procedural character')
+        console.warn(`[rig] ${url} has no root nodes — using procedural character`)
         return null
       }
 
@@ -221,7 +219,7 @@ export class CharacterRig implements Character {
       rig._normalizeScale(height)
       return rig
     } catch (e) {
-      console.warn('[rig] failed to load runner.glb, using procedural character:', e)
+      console.warn(`[rig] failed to load ${url}, using procedural character:`, e)
       return null
     }
   }

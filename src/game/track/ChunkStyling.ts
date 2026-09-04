@@ -61,6 +61,12 @@ export interface ChunkStyleOptions {
   preShadedMaterials?: Set<Material>
   /** Override the gradient range. Vehicles want a shallower ramp than foliage. */
   gradient?: { bottom: number; top: number }
+  /**
+   * Lifts every vertex by this height function of its world (x, z) after
+   * merging — how the track chunks take the shape of the terrain. Normals
+   * are recomputed afterwards.
+   */
+  terrain?: (x: number, z: number) => number
 }
 
 export interface ChunkStyleStats {
@@ -97,9 +103,10 @@ export function styleChunk(root: Mesh, opts: ChunkStyleOptions): ChunkStyleStats
 
   let after = 0
   for (const { mat, meshes } of groups.values()) {
-    const merged = meshes.length > 1
-      ? Mesh.MergeMeshes(meshes, true, true, undefined, false, false)
-      : meshes[0]
+    // Always merge, even a group of one: MergeMeshes produces fresh
+    // geometry in world space. Baking a lone kit clone in place would
+    // write into the geometry it shares with its template.
+    const merged = Mesh.MergeMeshes(meshes, true, true, undefined, false, false)
     if (!merged) continue
 
     merged.material = mat
@@ -127,6 +134,20 @@ export function styleChunk(root: Mesh, opts: ChunkStyleOptions): ChunkStyleStats
 
     const g = opts.gradient
     _bakeHeightGradient(merged, g?.bottom ?? GRADIENT_BOTTOM, g?.top ?? GRADIENT_TOP)
+  }
+
+  if (opts.terrain) {
+    for (const mesh of root.getChildMeshes(false)) {
+      if (!(mesh instanceof Mesh)) continue
+      const positions = mesh.getVerticesData(VertexBuffer.PositionKind)
+      if (!positions) continue
+      for (let i = 0; i < positions.length; i += 3) {
+        positions[i + 1] += opts.terrain(positions[i], positions[i + 2])
+      }
+      mesh.setVerticesData(VertexBuffer.PositionKind, positions, false)
+      mesh.createNormals(false)
+      mesh.refreshBoundingInfo()
+    }
   }
 
   return { before, after }

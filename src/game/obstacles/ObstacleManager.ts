@@ -15,6 +15,7 @@ import { styleChunk } from '../track/ChunkStyling'
 import { getQualityProfile } from '../core/DeviceTier'
 import { getCoinTexture } from '../fx/Textures'
 import { Kits } from '../assets/Kits'
+import { terrainY, terrainSlope } from '../track/Terrain'
 import { Player } from '../player/Player'
 
 const SPAWN_AHEAD    = 70
@@ -300,6 +301,11 @@ export class ObstacleManager {
         `[obstacle] ${obs.mesh.name}: ${stats.before} meshes merged into ${stats.after}`,
       )
     }
+
+    // Sit on the hill and lean with it. Collision is unaffected: it
+    // works in flat track space, and the player is lifted the same way.
+    obs.mesh.position.y = terrainY(z)
+    obs.mesh.rotation.x = -Math.atan(terrainSlope(z))
 
     this.obstacles.push(obs)
     return extraGap
@@ -1074,7 +1080,8 @@ export class ObstacleManager {
 
     // ── Coins: bob, magnet pull, collect, despawn ──
     const attract = this.magnetTimer > 0 || this.starPower
-    const centerY = player.bodyBottom + 0.75
+    // World-space centre of the player (includes the terrain lift).
+    const centerY = pp.y
     for (let i = this.coins.length - 1; i >= 0; i--) {
       const coin = this.coins[i]
       if (coin.collected) continue
@@ -1098,7 +1105,7 @@ export class ObstacleManager {
         const step = Math.min(len, MAGNET_SPEED * dt)
         if (len > 1e-3) cp.addInPlace(d.scale(step / len))
       } else {
-        cp.y = coin.baseY + Math.sin(this.time * 3.5 + coin.bobOffset) * 0.16
+        cp.y = coin.baseY + terrainY(cp.z) + Math.sin(this.time * 3.5 + coin.bobOffset) * 0.16
       }
       coin.mesh.rotation.z += dt * 3.8
 
@@ -1116,7 +1123,8 @@ export class ObstacleManager {
       if (s.life <= 0) { s.mesh.dispose(); this.spilled.splice(i, 1); continue }
       s.vel.y -= 16 * dt
       s.mesh.position.addInPlace(s.vel.scale(dt))
-      if (s.mesh.position.y < 0.3) { s.mesh.position.y = 0.3; s.vel.y = Math.abs(s.vel.y) * 0.45 }
+      const floor = terrainY(s.mesh.position.z) + 0.3
+      if (s.mesh.position.y < floor) { s.mesh.position.y = floor; s.vel.y = Math.abs(s.vel.y) * 0.45 }
       s.mesh.rotation.z += dt * 9
       const k = Math.min(1, s.life * 2)
       s.mesh.scaling.setAll(k)
@@ -1131,7 +1139,7 @@ export class ObstacleManager {
         this.pickups.splice(i, 1)
         continue
       }
-      mp.y = COIN_Y + 0.15 + Math.sin(this.time * 2.5 + p.bobOffset) * 0.2
+      mp.y = COIN_Y + 0.15 + terrainY(mp.z) + Math.sin(this.time * 2.5 + p.bobOffset) * 0.2
       p.mesh.rotation.y += dt * 2.2
       if (Math.abs(pp.x - mp.x) < 1.1 && Math.abs(pp.z - mp.z) < 1.1 && Math.abs(mp.y - centerY) < 1.5) {
         p.collected = true

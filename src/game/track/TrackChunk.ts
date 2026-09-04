@@ -14,6 +14,7 @@ import { styleChunk } from './ChunkStyling'
 import { getQualityProfile } from '../core/DeviceTier'
 import { getAsphaltTexture, getGrassTexture, getBuildingTextures } from '../fx/Textures'
 import { Kits } from '../assets/Kits'
+import { terrainYAt } from './Terrain'
 
 export const LANE_POSITIONS = [-2.5, 0, 2.5]
 export const CHUNK_LENGTH   = 30
@@ -169,6 +170,7 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
     authoredColorMaterials: new Set<Material>([sharedGrassMat]),
     preShadedMaterials: Kits.materials,
     flatShade: getQualityProfile().flatShade,
+    terrain: terrainYAt,
   })
   if (!_loggedStyleStats) {
     _loggedStyleStats = true
