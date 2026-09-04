@@ -12,6 +12,8 @@ import {
   Constants,
 } from '@babylonjs/core'
 import { getQualityProfile } from '../core/DeviceTier'
+import { getRainbowTexture } from './Textures'
+import { ZONES } from '../zones/ZoneManager'
 
 /**
  * Ambient life — the small motion that stops the world reading as a
@@ -43,6 +45,10 @@ export class Ambient {
   private butterflies: Butterfly[] = []
   private petals: ParticleSystem
   private petalEmitter: Mesh
+  private rain: ParticleSystem
+  private rainbow: Mesh
+  private rainbowMat: StandardMaterial
+  private winter = false
 
   constructor(scene: Scene) {
     this.scene = scene
@@ -50,19 +56,31 @@ export class Ambient {
     this._buildButterflies()
     this.petalEmitter = new Mesh('petalEmitter', scene)
     this.petals = this._buildPetals()
+    this.rain = this._buildRain()
+    ;({ mesh: this.rainbow, mat: this.rainbowMat } = this._buildRainbow())
     this.setZone('meadow')
   }
 
-  setZone(zoneId: string): void {
+  /** `winter` turns the forest's leaves into snow. */
+  setZone(zoneId: string, winter = false): void {
     this.zone = zoneId
+    this.winter = winter
     const meadow = zoneId === 'meadow'
     for (const b of this.butterflies) b.mesh.setEnabled(meadow)
 
     // Petal colour per zone; off where nothing would fall.
     const p = this.petals
+    p.minSize = 0.10; p.maxSize = 0.22; p.emitRate = 14 * getQualityProfile().particleScale
+    p.gravity = new Vector3(0, -0.9, 0)
     if (zoneId === 'meadow') {
       p.color1 = new Color4(1.0, 0.65, 0.80, 1); p.color2 = new Color4(1.0, 0.85, 0.90, 1)
       p.colorDead = new Color4(1, 0.7, 0.8, 0); p.start()
+    } else if (zoneId === 'forest' && winter) {
+      p.color1 = new Color4(1, 1, 1, 1); p.color2 = new Color4(0.92, 0.96, 1, 1)
+      p.colorDead = new Color4(1, 1, 1, 0)
+      p.minSize = 0.08; p.maxSize = 0.16; p.emitRate = 60 * getQualityProfile().particleScale
+      p.gravity = new Vector3(0, -0.5, 0)
+      p.start()
     } else if (zoneId === 'forest') {
       p.color1 = new Color4(0.95, 0.55, 0.15, 1); p.color2 = new Color4(0.60, 0.80, 0.25, 1)
       p.colorDead = new Color4(0.9, 0.5, 0.1, 0); p.start()
@@ -74,11 +92,88 @@ export class Ambient {
     }
   }
 
-  update(playerPos: Vector3, dt: number): void {
+  update(playerPos: Vector3, dt: number, distance = 0): void {
     this.time += dt
     this.petalEmitter.position.copyFrom(playerPos)
     this._updateBirds(playerPos, dt)
     if (this.zone === 'meadow') this._updateButterflies(playerPos, dt)
+    this._updateWeather(playerPos, distance)
+  }
+
+  // ─── Weather: a shower at the start of the forest, then a rainbow ─────────
+
+  private _updateWeather(playerPos: Vector3, distance: number): void {
+    const forest = ZONES.find(z => z.id === 'forest')?.startDist ?? 500
+    const inForest = this.zone === 'forest' && !this.winter
+    const rel = distance - forest
+    const raining = inForest && rel > -20 && rel < 150
+    if (raining && !this.rain.isStarted()) this.rain.start()
+    if (!raining && this.rain.isStarted()) this.rain.stop()
+
+    // Rainbow: fades in as the rain clears, hangs over the road ahead, fades out.
+    const t = inForest ? Math.min(1, Math.max(0, (rel - 130) / 60)) * (1 - Math.min(1, Math.max(0, (rel - 360) / 90))) : 0
+    this.rainbow.setEnabled(t > 0.01)
+    if (t > 0.01) {
+      this.rainbowMat.alpha = 0.72 * t
+      this.rainbow.position.set(0, 2, playerPos.z + 150)
+    }
+  }
+
+  private _buildRain(): ParticleSystem {
+    const tex = new DynamicTexture('rainTex', { width: 8, height: 32 }, this.scene, false)
+    const ctx = tex.getContext() as CanvasRenderingContext2D
+    ctx.clearRect(0, 0, 8, 32)
+    const g = ctx.createLinearGradient(0, 0, 0, 32)
+    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.9)'); g.addColorStop(1, 'rgba(255,255,255,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(3, 0, 2, 32)
+    tex.update(false)
+    tex.hasAlpha = true
+
+    const scale = getQualityProfile().particleScale
+    const ps = new ParticleSystem('rain', Math.ceil(700 * scale), this.scene)
+    ps.particleTexture = tex as Texture
+    ps.emitter         = this.petalEmitter
+    ps.minEmitBox      = new Vector3(-14, 9, -6)
+    ps.maxEmitBox      = new Vector3( 14, 12, 40)
+    ps.minScaleX = 0.5; ps.maxScaleX = 0.7
+    ps.minScaleY = 4;   ps.maxScaleY = 6
+    ps.minSize = 0.12;  ps.maxSize = 0.16
+    ps.minLifeTime = 0.55; ps.maxLifeTime = 0.7
+    ps.emitRate    = 260 * scale
+    ps.direction1  = new Vector3(-0.3, -18, -0.5)
+    ps.direction2  = new Vector3( 0.3, -22,  0.5)
+    ps.minEmitPower = 1; ps.maxEmitPower = 1.2
+    ps.color1 = new Color4(0.80, 0.88, 1.0, 0.55)
+    ps.color2 = new Color4(0.90, 0.95, 1.0, 0.45)
+    ps.colorDead = new Color4(0.9, 0.95, 1, 0)
+    ps.gravity = new Vector3(0, -6, 0)
+    ps.blendMode = ParticleSystem.BLENDMODE_STANDARD
+    ps.isBillboardBased = true
+    return ps
+  }
+
+  /** A flat ribbon arc with the rainbow gradient across its width. */
+  private _buildRainbow(): { mesh: Mesh; mat: StandardMaterial } {
+    const inner: Vector3[] = [], outer: Vector3[] = []
+    const rIn = 46, rOut = 56, segs = 36
+    for (let i = 0; i <= segs; i++) {
+      const a = (i / segs) * Math.PI
+      inner.push(new Vector3(Math.cos(a) * rIn, Math.sin(a) * rIn, 0))
+      outer.push(new Vector3(Math.cos(a) * rOut, Math.sin(a) * rOut, 0))
+    }
+    const mesh = MeshBuilder.CreateRibbon('rainbow', { pathArray: [inner, outer], sideOrientation: Mesh.DOUBLESIDE }, this.scene)
+    const mat = new StandardMaterial('rainbowArcMat', this.scene)
+    mat.disableLighting = true
+    mat.emissiveColor   = Color3.White()
+    mat.diffuseTexture  = getRainbowTexture(this.scene)
+    mat.alpha           = 0.7
+    mat.backFaceCulling = false
+    mat.fogEnabled      = false
+    mesh.material   = mat
+    mesh.isPickable = false
+    mesh.setEnabled(false)
+    return { mesh, mat }
   }
 
   // ─── Birds ─────────────────────────────────────────────────────────────────

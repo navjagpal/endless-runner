@@ -22,7 +22,48 @@ export const CHUNK_LENGTH   = 30
 /** Report the merge ratio once per session rather than every 30 metres. */
 let _loggedStyleStats = false
 
+/**
+ * Footprints of the props placed in the chunk being built. The verge
+ * darkens under each one — baked contact occlusion, the cheapest thing
+ * that makes a tree look like it stands on the ground rather than
+ * hovers over it.
+ */
+let _footprints: { x: number; z: number; r: number }[] = []
+
+function _place(root: Mesh, model: string, x: number, y: number, z: number, scale: number, yaw = 0): void {
+  const size = Kits.place(root, model, x, y, z, scale, yaw)
+  if (size) _footprints.push({ x, z, r: Math.max(size.x, size.z) * 0.42 })
+}
+
+function _aoAt(x: number, z: number): number {
+  let k = 1
+  for (const f of _footprints) {
+    const dx = x - f.x, dz = z - f.z
+    const d = Math.sqrt(dx * dx + dz * dz)
+    const reach = f.r * 1.7
+    if (d < reach) {
+      const t = d / reach
+      k *= 1 - 0.42 * (1 - t * t * (3 - 2 * t))
+    }
+  }
+  return k
+}
+
 export interface ChunkData { root: Mesh; zStart: number; zEnd: number }
+
+/**
+ * Landmark features, one every few chunks per zone, keyed off the chunk
+ * index so a run always has them and never two in a row.
+ */
+export type ChunkFeature = 'none' | 'tunnel' | 'bridge' | 'overpass'
+export function chunkFeature(zoneId: string, zStart: number): ChunkFeature {
+  const idx = Math.round(zStart / CHUNK_LENGTH)
+  if (zStart < 50) return 'none'
+  if (zoneId === 'forest' && idx % 5 === 2) return 'tunnel'
+  if (zoneId === 'beach'  && idx % 5 === 2) return 'bridge'
+  if (zoneId === 'city'   && idx % 4 === 1) return 'overpass'
+  return 'none'
+}
 
 // ─── Material cache — one instance per unique descriptor ─────────────────────
 
@@ -117,12 +158,11 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
   const root  = new Mesh('chunk', scene)
   const zMid  = zStart + CHUNK_LENGTH / 2
   const isSpace = zoneId === 'space'
+  const feature = chunkFeature(zoneId, zStart)
+  _footprints = []
 
   // ── Road ──
   _addRoadSurface(scene, root, zStart, zMid)
-
-  // ── Grass / ground shoulders ──
-  for (const side of [-1, 1]) _addGroundShoulder(scene, root, side, zStart, zMid)
 
   // ── Curbs ──
   for (const side of [-1, 1]) {
@@ -133,8 +173,9 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
     curb.parent = root
   }
 
-  // ── Lane dashes ──
-  for (const laneX of [-1.25, 1.25]) {
+  // ── Lane dashes (rails on the railway) ──
+  if (zoneId === 'railway') _addRails(scene, root, zStart, zMid)
+  else for (const laneX of [-1.25, 1.25]) {
     for (let i = 0; i < 5; i++) {
       const dash = MeshBuilder.CreateBox('dash', { width: 0.13, height: 0.012, depth: 2.2 }, scene)
       dash.position = new Vector3(laneX, 0.012, zStart + 3 + i * 5.5)
@@ -151,8 +192,13 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
     line.parent   = root
   }
 
-  // ── Zone-specific props ──
-  _addZoneProps(scene, root, zStart, zoneId)
+  // ── Zone-specific props (a bridge has water instead of a verge) ──
+  if (feature !== 'bridge') _addZoneProps(scene, root, zStart, zoneId)
+
+  // ── Landmarks ──
+  if (feature === 'tunnel')   _addTunnel(scene, root, zStart)
+  if (feature === 'bridge')   _addBridge(scene, root, zStart, zMid)
+  if (feature === 'overpass') _addOverpass(scene, root, zMid)
 
   // ── Lamp posts (all zones — colour changes via lamp point lights) ──
   if (!isSpace) {
@@ -160,6 +206,11 @@ export function createChunk(scene: Scene, zStart: number, zoneId: string): Chunk
       const lz = zStart + 5 + i * 15
       for (const side of [-1, 1]) _addLamp(scene, root, side * 5.5, lz)
     }
+  }
+
+  // ── Grass / ground shoulders — last, so they can darken under the props ──
+  if (feature !== 'bridge') {
+    for (const side of [-1, 1]) _addGroundShoulder(scene, root, side, zStart, zMid)
   }
 
   // Collapse the chunk's ~100 loose meshes into one per material, then
@@ -264,8 +315,10 @@ function _addRoadSurface(scene: Scene, root: Mesh, zStart: number, zMid: number)
  */
 function _addGroundShoulder(scene: Scene, root: Mesh, side: number, zStart: number, zMid: number): void {
   const WIDTH = 22
-  const COLS  = 10
-  const ROWS  = 10
+  // Fine enough that a tree's contact shadow is a soft disc, not a
+  // single dark vertex.
+  const COLS  = 22
+  const ROWS  = 30
   const AMPLITUDE = 0.38
 
   const ground = MeshBuilder.CreateGround('grass', {
@@ -291,7 +344,7 @@ function _addGroundShoulder(scene: Scene, root: Mesh, side: number, zStart: numb
 
       positions[i + 1] = Math.min(0, (n - 1) * 0.5) * AMPLITUDE * fade
 
-      const tint = 0.90 + n * 0.09 + Math.sin(wx * 5.1 + wz * 3.3) * 0.04
+      const tint = (0.90 + n * 0.09 + Math.sin(wx * 5.1 + wz * 3.3) * 0.04) * _aoAt(worldX, worldZ)
       colors[c] = colors[c + 1] = colors[c + 2] = tint
       colors[c + 3] = 1
 
@@ -317,6 +370,7 @@ function _addZoneProps(scene: Scene, root: Mesh, zStart: number, zoneId: string)
     case 'meadow': _addMeadowProps(scene, root, zStart, spacing); break
     case 'forest': _addForestProps(scene, root, zStart, spacing); break
     case 'city':   _addCityProps(scene, root, zStart, spacing);   break
+    case 'railway': _addRailwayProps(scene, root, zStart); break
     case 'beach':  _addBeachProps(scene, root, zStart, spacing);  break
     case 'space':  _addSpaceProps(scene, root, zStart, spacing);  break
     default:       _addMeadowProps(scene, root, zStart, spacing); break
@@ -602,6 +656,204 @@ function _addSpaceProps(scene: Scene, root: Mesh, zStart: number, _spacing: numb
   }
 }
 
+// ─── Railway ──────────────────────────────────────────────────────────────────
+
+/** Three pairs of rails on sleepers, one per lane, in place of the lane paint. */
+function _addRails(scene: Scene, root: Mesh, zStart: number, zMid: number): void {
+  const railMat    = _pbr(scene, new Color3(0.55, 0.56, 0.60), 0.6, 0.35)
+  const sleeperMat = _pbr(scene, new Color3(0.40, 0.28, 0.18), 0, 0.95)
+  for (const laneX of LANE_POSITIONS) {
+    for (const dx of [-0.55, 0.55]) {
+      const rail = MeshBuilder.CreateBox('rail', { width: 0.10, height: 0.10, depth: CHUNK_LENGTH }, scene)
+      rail.position = new Vector3(laneX + dx, 0.06, zMid)
+      rail.material = railMat; rail.parent = root
+    }
+    for (let i = 0; i < CHUNK_LENGTH / 1.5; i++) {
+      const sleeper = MeshBuilder.CreateBox('sleeper', { width: 1.6, height: 0.06, depth: 0.32 }, scene)
+      sleeper.position = new Vector3(laneX, 0.02, zStart + 0.75 + i * 1.5)
+      sleeper.material = sleeperMat; sleeper.parent = root
+    }
+  }
+}
+
+function _addRailwayProps(scene: Scene, root: Mesh, zStart: number): void {
+  const crateMat  = _pbr(scene, new Color3(0.72, 0.52, 0.30), 0, 0.9)
+  const steelMat  = _pbr(scene, new Color3(0.42, 0.45, 0.50), 0.4, 0.5)
+  const redLamp   = _emissive(scene, new Color3(1.0, 0.15, 0.10))
+  const greenLamp = _emissive(scene, new Color3(0.20, 1.0, 0.30))
+  const stripeMat = _pbr(scene, new Color3(0.95, 0.85, 0.10), 0, 0.8)
+
+  // Signals at the kerb
+  for (let i = 0; i < 2; i++) {
+    const side = i === 0 ? -1 : 1
+    const z = zStart + 6 + i * 14
+    const post = MeshBuilder.CreateCylinder('sigpost', { height: 3.6, diameter: 0.18, tessellation: 6 }, scene)
+    post.position = new Vector3(side * 5.6, 1.8, z); post.material = steelMat; post.parent = root
+    const head = MeshBuilder.CreateBox('sighead', { width: 0.5, height: 1.1, depth: 0.4 }, scene)
+    head.position = new Vector3(side * 5.6, 3.7, z); head.material = steelMat; head.parent = root
+    const lamp = MeshBuilder.CreateSphere('siglamp', { diameter: 0.28, segments: 5 }, scene)
+    lamp.position = new Vector3(side * 5.6, 3.95, z - 0.22); lamp.material = i === 0 ? greenLamp : redLamp; lamp.parent = root
+    const lamp2 = MeshBuilder.CreateSphere('siglamp', { diameter: 0.28, segments: 5 }, scene)
+    lamp2.position = new Vector3(side * 5.6, 3.45, z - 0.22); lamp2.material = i === 0 ? redLamp : greenLamp; lamp2.parent = root
+  }
+
+  // Stacked crates and a striped barrier-arm on the verge
+  for (let i = 0; i < 4; i++) {
+    const side = Math.random() > 0.5 ? 1 : -1
+    const cx = side * _rnd(7, 13), cz = zStart + Math.random() * CHUNK_LENGTH
+    const n = 1 + Math.floor(Math.random() * 3)
+    for (let k = 0; k < n; k++) {
+      const crate = MeshBuilder.CreateBox('crate', { size: 1.1 }, scene)
+      crate.position = new Vector3(cx + (k % 2) * 0.3, 0.55 + Math.floor(k / 2) * 1.1, cz + (k % 2) * 0.2)
+      crate.rotation.y = _rnd(-0.3, 0.3)
+      crate.material = crateMat; crate.parent = root
+    }
+  }
+  for (const side of [-1, 1]) {
+    const arm = MeshBuilder.CreateBox('gatearm', { width: 3.2, height: 0.16, depth: 0.16 }, scene)
+    arm.position = new Vector3(side * 8.2, 1.1, zStart + 22); arm.material = stripeMat; arm.parent = root
+    const box = MeshBuilder.CreateBox('gatebox', { width: 0.5, height: 1.2, depth: 0.5 }, scene)
+    box.position = new Vector3(side * 6.7, 0.6, zStart + 22); box.material = steelMat; box.parent = root
+  }
+
+  // Kit dressing: fences, a couple of buildings, weeds
+  if (Kits.isLoaded('nature')) {
+    for (let i = 0; i < CHUNK_LENGTH / 2; i++) {
+      for (const side of [-1, 1]) _place(root, 'fence_planks', side * 6.0, 0, zStart + 1 + i * 2, 2.0, Math.PI / 2)
+    }
+    for (let i = 0; i < 5; i++) {
+      _place(root, 'grass_large', (Math.random() > 0.5 ? 1 : -1) * _rnd(6.5, 16), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2, 3), _yaw())
+    }
+  }
+  if (Kits.isLoaded('city')) {
+    for (const side of [-1, 1]) {
+      if (Math.random() < 0.6) {
+        const model = _pick(['building-a', 'building-c', 'building-f'])
+        const size = Kits.size(model)
+        if (size) {
+          const scale = _rnd(4.5, 5.5)
+          _place(root, model, side * (13 + size.x * scale / 2), 0, zStart + _rnd(6, 24), scale, side > 0 ? -Math.PI / 2 : Math.PI / 2)
+        }
+      }
+    }
+  }
+}
+
+// ─── Landmarks ────────────────────────────────────────────────────────────────
+
+/**
+ * A rock tunnel over the whole chunk: a half-cylinder shell the road runs
+ * through, lit from inside by a row of warm lamps. Walls sit outside the
+ * kerbs so nothing on the road changes.
+ */
+function _addTunnel(scene: Scene, root: Mesh, zStart: number): void {
+  const rockMat  = _pbr(scene, new Color3(0.42, 0.40, 0.44), 0, 0.95)
+  const innerMat = _pbr(scene, new Color3(0.30, 0.29, 0.34), 0, 0.95)
+  const trimMat  = _pbr(scene, new Color3(0.62, 0.58, 0.55), 0, 0.9)
+  const lampMat  = _emissive(scene, new Color3(1.0, 0.85, 0.55))
+
+  // Shell: outer rock, inner lining, as ribbons between an arc at each
+  // end of the chunk — no guessing at cylinder orientation.
+  const arc = (r: number, z: number, yBase: number): Vector3[] => {
+    const pts: Vector3[] = []
+    for (let i = 0; i <= 14; i++) {
+      const a = (i / 14) * Math.PI
+      pts.push(new Vector3(Math.cos(a) * r, Math.sin(a) * r + yBase, z))
+    }
+    return pts
+  }
+  for (const [r, mat] of [[6.9, rockMat], [6.5, innerMat]] as [number, PBRMaterial][]) {
+    const shell = MeshBuilder.CreateRibbon('tunnel', {
+      pathArray: [arc(r, zStart, 0.3), arc(r, zStart + CHUNK_LENGTH, 0.3)],
+      sideOrientation: Mesh.DOUBLESIDE,
+    }, scene)
+    shell.material = mat
+    shell.parent = root
+  }
+  // Portal rings at both ends: a flat band between two arcs.
+  for (const z of [zStart + 0.05, zStart + CHUNK_LENGTH - 0.05]) {
+    const ring = MeshBuilder.CreateRibbon('portal', {
+      pathArray: [arc(6.9, z, 0.3), arc(7.8, z, 0.3)],
+      sideOrientation: Mesh.DOUBLESIDE,
+    }, scene)
+    ring.material = trimMat
+    ring.parent = root
+  }
+  // Ceiling lamps
+  for (let i = 0; i < 6; i++) {
+    const lz = zStart + 2.5 + i * 5
+    const lamp = MeshBuilder.CreateBox('tlamp', { width: 1.2, height: 0.2, depth: 0.5 }, scene)
+    lamp.position = new Vector3(0, 6.4, lz)
+    lamp.material = lampMat
+    lamp.parent = root
+  }
+}
+
+/**
+ * A bridge over water: the verge is gone, replaced by a wide blue plane
+ * a couple of metres down, with railings and pylons on the road.
+ */
+function _addBridge(scene: Scene, root: Mesh, zStart: number, zMid: number): void {
+  const water = _pbr(scene, new Color3(0.20, 0.62, 0.92), 0.05, 0.3)
+  const railMat = _pbr(scene, new Color3(0.97, 0.97, 0.95), 0, 0.6)
+  const pylonMat = _pbr(scene, new Color3(0.75, 0.72, 0.68), 0, 0.9)
+
+  const sea = MeshBuilder.CreateGround('bridgeWater', { width: 80, height: CHUNK_LENGTH + 0.5 }, scene)
+  sea.position = new Vector3(0, -0.32, zMid)
+  sea.material = water
+  sea.parent = root
+
+  for (const side of [-1, 1]) {
+    for (let i = 0; i <= CHUNK_LENGTH / 3; i++) {
+      const post = MeshBuilder.CreateBox('bpost', { width: 0.16, height: 1.1, depth: 0.16 }, scene)
+      post.position = new Vector3(side * 4.9, 0.55, zStart + i * 3)
+      post.material = railMat; post.parent = root
+    }
+    for (const ry of [0.55, 1.0]) {
+      const rail = MeshBuilder.CreateBox('brail', { width: 0.1, height: 0.1, depth: CHUNK_LENGTH }, scene)
+      rail.position = new Vector3(side * 4.9, ry, zMid)
+      rail.material = railMat; rail.parent = root
+    }
+    for (let i = 0; i < 3; i++) {
+      const pylon = MeshBuilder.CreateBox('pylon', { width: 1.2, height: 0.9, depth: 1.2 }, scene)
+      pylon.position = new Vector3(side * 5.2, -0.45, zStart + 5 + i * 10)
+      pylon.material = pylonMat; pylon.parent = root
+    }
+  }
+  // Road slab edge, deeper than usual so the bridge reads as a deck
+  const deck = MeshBuilder.CreateBox('deck', { width: 10.6, height: 0.5, depth: CHUNK_LENGTH }, scene)
+  deck.position = new Vector3(0, -0.28, zMid)
+  deck.material = pylonMat
+  deck.parent = root
+}
+
+/**
+ * A city overpass crossing above the road, with a couple of parked kit
+ * cars on it. Clearance is well above anything the player can reach.
+ */
+function _addOverpass(scene: Scene, root: Mesh, zMid: number): void {
+  const concrete = _pbr(scene, new Color3(0.70, 0.68, 0.66), 0, 0.9)
+  const railMat  = _pbr(scene, new Color3(0.35, 0.38, 0.45), 0.3, 0.6)
+  const deck = MeshBuilder.CreateBox('odeck', { width: 26, height: 0.7, depth: 4.2 }, scene)
+  deck.position = new Vector3(0, 5.6, zMid)
+  deck.material = concrete; deck.parent = root
+  for (const side of [-1, 1]) {
+    const pylon = MeshBuilder.CreateBox('opylon', { width: 1.0, height: 5.3, depth: 3.0 }, scene)
+    pylon.position = new Vector3(side * 6.6, 2.65, zMid)
+    pylon.material = concrete; pylon.parent = root
+  }
+  for (const dz of [-1.95, 1.95]) {
+    const rail = MeshBuilder.CreateBox('orail', { width: 26, height: 0.9, depth: 0.12 }, scene)
+    rail.position = new Vector3(0, 6.4, zMid + dz)
+    rail.material = railMat; rail.parent = root
+  }
+  if (Kits.isLoaded('vehicles')) {
+    for (const [x, model] of [[-7.5, 'taxi'], [4, 'suv'], [10, 'van']] as [number, string][]) {
+      _place(root, model, x, 5.95, zMid, 1.05, Math.PI / 2)
+    }
+  }
+}
+
 // ─── Kit-based props ──────────────────────────────────────────────────────────
 //
 // The same layouts as the primitive builders above, placed with Kenney
@@ -628,31 +880,31 @@ function _addMeadowKit(_scene: Scene, root: Mesh, zStart: number, spacing: numbe
   for (let i = 0; i < 5; i++) {
     const z = zStart + 1 + i * spacing + _rnd(-1, 1)
     for (const side of [-1, 1]) {
-      Kits.place(root, _pick(MEADOW_TREES), side * _rnd(7.8, 9.3), 0, z, _rnd(3.4, 4.8), _yaw())
+      _place(root, _pick(MEADOW_TREES), side * _rnd(7.8, 9.3), 0, z, _rnd(3.4, 4.8), _yaw())
       if (Math.random() < 0.75)
-        Kits.place(root, _pick(MEADOW_TREES), side * _rnd(12.5, 20), 0, z + spacing * 0.5, _rnd(3.0, 4.6), _yaw())
+        _place(root, _pick(MEADOW_TREES), side * _rnd(12.5, 20), 0, z + spacing * 0.5, _rnd(3.0, 4.6), _yaw())
     }
   }
   for (let i = 0; i < 6; i++) {
     const side = Math.random() > 0.5 ? 1 : -1
-    Kits.place(root, _pick(BUSHES), side * _rnd(6.2, 9.5), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.4, 3.6), _yaw())
+    _place(root, _pick(BUSHES), side * _rnd(6.2, 9.5), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.4, 3.6), _yaw())
   }
   // Wooden fence along the verge: 1-unit panels scaled to 2 m, laid end to end.
   for (let i = 0; i < CHUNK_LENGTH / 2; i++) {
     const z = zStart + 1 + i * 2
-    for (const side of [-1, 1]) Kits.place(root, 'fence_simple', side * 5.3, 0, z, 2.0, Math.PI / 2)
+    for (const side of [-1, 1]) _place(root, 'fence_simple', side * 5.3, 0, z, 2.0, Math.PI / 2)
   }
   for (let i = 0; i < 6; i++) {
     const cx = (Math.random() > 0.5 ? 1 : -1) * _rnd(6.5, 16)
     const cz = zStart + Math.random() * CHUNK_LENGTH
     const flower = _pick(FLOWERS)
-    for (let k = 0; k < 3; k++) Kits.place(root, flower, cx + _rnd(-0.8, 0.8), 0, cz + _rnd(-0.8, 0.8), _rnd(2.0, 2.6), _yaw())
+    for (let k = 0; k < 3; k++) _place(root, flower, cx + _rnd(-0.8, 0.8), 0, cz + _rnd(-0.8, 0.8), _rnd(2.0, 2.6), _yaw())
   }
   for (let i = 0; i < 6; i++) {
-    Kits.place(root, 'grass_large', (Math.random() > 0.5 ? 1 : -1) * _rnd(6, 18), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.2, 3.0), _yaw())
+    _place(root, 'grass_large', (Math.random() > 0.5 ? 1 : -1) * _rnd(6, 18), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.2, 3.0), _yaw())
   }
   for (let i = 0; i < 2; i++) {
-    Kits.place(root, _pick(SMALL_ROCKS), (Math.random() > 0.5 ? 1 : -1) * _rnd(7, 15), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(1.8, 2.6), _yaw())
+    _place(root, _pick(SMALL_ROCKS), (Math.random() > 0.5 ? 1 : -1) * _rnd(7, 15), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(1.8, 2.6), _yaw())
   }
 }
 
@@ -660,22 +912,22 @@ function _addForestKit(_scene: Scene, root: Mesh, zStart: number, spacing: numbe
   for (let i = 0; i < 6; i++) {
     const z = zStart + i * (spacing * 0.85)
     for (const side of [-1, 1]) {
-      Kits.place(root, _pick(PINES), side * _rnd(7.2, 10), 0, z, _rnd(3.8, 5.4), _yaw())
+      _place(root, _pick(PINES), side * _rnd(7.2, 10), 0, z, _rnd(3.8, 5.4), _yaw())
       if (Math.random() < 0.85)
-        Kits.place(root, _pick(PINES), side * _rnd(12, 21), 0, z + 2.5, _rnd(3.6, 5.6), _yaw())
+        _place(root, _pick(PINES), side * _rnd(12, 21), 0, z + 2.5, _rnd(3.6, 5.6), _yaw())
     }
   }
   for (let i = 0; i < 5; i++) {
-    Kits.place(root, _pick(MUSHROOMS), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.2, 10), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.4, 4.0), _yaw())
+    _place(root, _pick(MUSHROOMS), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.2, 10), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.4, 4.0), _yaw())
   }
   for (let i = 0; i < 3; i++) {
-    Kits.place(root, _pick(ROCKS), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.5, 14), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.0, 3.2), _yaw())
+    _place(root, _pick(ROCKS), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.5, 14), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.0, 3.2), _yaw())
   }
   for (let i = 0; i < 2; i++) {
-    Kits.place(root, _pick(['stump_round', 'stump_oldTall', 'log', 'log_stack']), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.2, 9), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.2, 3.0), _yaw())
+    _place(root, _pick(['stump_round', 'stump_oldTall', 'log', 'log_stack']), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.2, 9), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.2, 3.0), _yaw())
   }
   for (let i = 0; i < 4; i++) {
-    Kits.place(root, _pick(BUSHES), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.2, 12), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.2, 3.2), _yaw())
+    _place(root, _pick(BUSHES), (Math.random() > 0.5 ? 1 : -1) * _rnd(6.2, 12), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.2, 3.2), _yaw())
   }
 }
 
@@ -690,7 +942,7 @@ function _addCityKit(scene: Scene, root: Mesh, zStart: number): void {
       const scale = tall ? _rnd(4.6, 5.4) : _rnd(5.6, 6.6)
       // Facade flush with the sidewalk edge, whatever the footprint.
       const x = side * (11.4 + size.x * scale / 2)
-      Kits.place(root, model, x, 0, bz, scale, side > 0 ? -Math.PI / 2 : Math.PI / 2)
+      _place(root, model, x, 0, bz, scale, side > 0 ? -Math.PI / 2 : Math.PI / 2)
     }
   }
 
@@ -702,7 +954,7 @@ function _addCityKit(scene: Scene, root: Mesh, zStart: number): void {
       const planter = MeshBuilder.CreateBox('planter', { width: 0.9, height: 0.5, depth: 0.9 }, scene)
       planter.position = new Vector3(side * 6.4, 0.25, z)
       planter.material = planterMat; planter.parent = root
-      Kits.place(root, _pick(['tree_small', 'tree_simple', 'tree_oak']), side * 6.4, 0.5, z, _rnd(2.2, 2.8), _yaw())
+      _place(root, _pick(['tree_small', 'tree_simple', 'tree_oak']), side * 6.4, 0.5, z, _rnd(2.2, 2.8), _yaw())
     }
   }
 
@@ -713,8 +965,8 @@ function _addBeachKit(scene: Scene, root: Mesh, zStart: number, spacing: number)
   for (let i = 0; i < 5; i++) {
     const z = zStart + 1 + i * spacing + _rnd(-1, 1)
     for (const side of [-1, 1]) {
-      Kits.place(root, _pick(PALMS), side * _rnd(7, 10), 0, z, _rnd(3.6, 4.8), _yaw())
-      if (Math.random() < 0.6) Kits.place(root, _pick(PALMS), side * _rnd(12, 18), 0, z + 3, _rnd(3.2, 4.4), _yaw())
+      _place(root, _pick(PALMS), side * _rnd(7, 10), 0, z, _rnd(3.6, 4.8), _yaw())
+      if (Math.random() < 0.6) _place(root, _pick(PALMS), side * _rnd(12, 18), 0, z + 3, _rnd(3.2, 4.4), _yaw())
     }
   }
   for (let i = 0; i < 3; i++) {
@@ -729,10 +981,10 @@ function _addBeachKit(scene: Scene, root: Mesh, zStart: number, spacing: number)
     ball.material = ballMats[i % 3]; ball.parent = root
   }
   for (let i = 0; i < 3; i++) {
-    Kits.place(root, _pick(SMALL_ROCKS), (Math.random() > 0.5 ? 1 : -1) * _rnd(7, 16), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(1.8, 2.8), _yaw())
+    _place(root, _pick(SMALL_ROCKS), (Math.random() > 0.5 ? 1 : -1) * _rnd(7, 16), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(1.8, 2.8), _yaw())
   }
   for (let i = 0; i < 5; i++) {
-    Kits.place(root, 'grass_large', (Math.random() > 0.5 ? 1 : -1) * _rnd(6, 16), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.0, 2.8), _yaw())
+    _place(root, 'grass_large', (Math.random() > 0.5 ? 1 : -1) * _rnd(6, 16), 0, zStart + Math.random() * CHUNK_LENGTH, _rnd(2.0, 2.8), _yaw())
   }
   // Sandcastles stay primitive — the kit has none, and kids love them.
   const sandMat = _pbr(scene, new Color3(0.94, 0.82, 0.55))

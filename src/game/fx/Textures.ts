@@ -172,73 +172,109 @@ export function getBlobShadowTexture(scene: Scene): Texture {
  */
 export function getAsphaltTexture(scene: Scene): Texture {
   return _cached(scene, 'asphalt', () => {
-    const size = 256
+    const size = 512
     const tex  = _dyn(scene, 'asphaltTex', size)
     const ctx  = tex.getContext() as CanvasRenderingContext2D
     const img  = ctx.createImageData(size, size)
     const fbm  = _fbm(11)
-    const fine = _makeNoise(64, 99)
+    const fine = _makeNoise(128, 99)
+    const wear = _makeNoise(8, 41)
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const u = x / size, v = y / size
         const m = fbm(u, v)
-        const f = fine(u * 64, v * 64)
-        let k = 0.86 + (m - 0.5) * 0.16 + (f - 0.5) * 0.14
-        // sparse bright grit
-        if (f > 0.93) k += 0.10
-        k = Math.max(0.72, Math.min(1, k))
-        const i = (y * size + x) * 4
-        img.data[i] = img.data[i + 1] = img.data[i + 2] = Math.round(k * 255)
-        img.data[i + 3] = 255
-      }
-    }
-    ctx.putImageData(img, 0, 0)
-    tex.update(true)
-    return _tile(tex)
-  })
-}
-
-/**
- * Grass: clumpy mottle with short darker blade strokes. Hue comes from
- * the material so the same texture serves sand on the beach and
- * moon-dust in space.
- */
-export function getGrassTexture(scene: Scene): Texture {
-  return _cached(scene, 'grass', () => {
-    const size = 256
-    const tex  = _dyn(scene, 'grassTex', size)
-    const ctx  = tex.getContext() as CanvasRenderingContext2D
-    const img  = ctx.createImageData(size, size)
-    const fbm  = _fbm(23)
-    const fine = _makeNoise(32, 5)
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const u = x / size, v = y / size
-        const m = fbm(u, v)
-        const f = fine(u * 32, v * 32)
-        let k = 0.84 + (m - 0.5) * 0.30 + (f - 0.5) * 0.10
-        k = Math.max(0.66, Math.min(1.04, k))
+        const f = fine(u * 128, v * 128)
+        // Broad worn patches (lighter) over the aggregate speckle.
+        const w = wear(u * 8, v * 8)
+        let k = 0.84 + (m - 0.5) * 0.14 + (f - 0.5) * 0.16 + (w - 0.5) * 0.10
+        if (f > 0.94) k += 0.12
+        k = Math.max(0.68, Math.min(1.02, k))
         const i = (y * size + x) * 4
         img.data[i] = img.data[i + 1] = img.data[i + 2] = Math.round(Math.min(255, k * 255))
         img.data[i + 3] = 255
       }
     }
     ctx.putImageData(img, 0, 0)
-    // Blade strokes: short dark ticks, drawn with wrap-around so they tile.
-    ctx.strokeStyle = 'rgba(0,0,0,0.13)'
-    ctx.lineWidth = 1.5
-    let s = 1234
+    // Hairline cracks and tar seams, drawn with wrap so the tile stays seamless.
+    let s = 4242
     const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
-    for (let i = 0; i < 420; i++) {
-      const x = rnd() * size, y = rnd() * size
-      const len = 3 + rnd() * 5
-      const dx = (rnd() - 0.5) * 2, dy = -len
+    ctx.lineCap = 'round'
+    for (let i = 0; i < 14; i++) {
+      const x0 = rnd() * size, y0 = rnd() * size
+      const segs = 4 + Math.floor(rnd() * 5)
+      const dark = i < 9
+      ctx.strokeStyle = dark ? 'rgba(0,0,0,0.22)' : 'rgba(0,0,0,0.11)'
+      ctx.lineWidth = dark ? 1.4 : 3.5
       for (const [ox, oy] of [[0, 0], [size, 0], [-size, 0], [0, size], [0, -size]]) {
         ctx.beginPath()
-        ctx.moveTo(x + ox, y + oy)
-        ctx.lineTo(x + ox + dx, y + oy + dy)
+        let x = x0 + ox, y = y0 + oy
+        ctx.moveTo(x, y)
+        let ang = rnd() * Math.PI * 2
+        for (let k = 0; k < segs; k++) {
+          ang += (rnd() - 0.5) * 1.2
+          const len = 8 + rnd() * 22
+          x += Math.cos(ang) * len; y += Math.sin(ang) * len
+          ctx.lineTo(x, y)
+        }
         ctx.stroke()
       }
+    }
+    tex.update(true)
+    return _tile(tex)
+  })
+}
+
+/**
+ * Grass: clumpy mottle, blade strokes, and a scatter of bright specks
+ * that read as clover flowers once the material tints it green. Still
+ * near-white so the same texture serves sand and moon-dust.
+ */
+export function getGrassTexture(scene: Scene): Texture {
+  return _cached(scene, 'grass', () => {
+    const size = 512
+    const tex  = _dyn(scene, 'grassTex', size)
+    const ctx  = tex.getContext() as CanvasRenderingContext2D
+    const img  = ctx.createImageData(size, size)
+    const fbm  = _fbm(23)
+    const fine = _makeNoise(64, 5)
+    const clump = _makeNoise(16, 77)
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const u = x / size, v = y / size
+        const m = fbm(u, v)
+        const f = fine(u * 64, v * 64)
+        const c = clump(u * 16, v * 16)
+        let k = 0.82 + (m - 0.5) * 0.26 + (f - 0.5) * 0.12 + (c > 0.62 ? (c - 0.62) * 0.5 : 0)
+        k = Math.max(0.62, Math.min(1.06, k))
+        const i = (y * size + x) * 4
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = Math.round(Math.min(255, k * 255))
+        img.data[i + 3] = 255
+      }
+    }
+    ctx.putImageData(img, 0, 0)
+    let s = 1234
+    const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
+    const wrapStroke = (x: number, y: number, dx: number, dy: number) => {
+      for (const [ox, oy] of [[0, 0], [size, 0], [-size, 0], [0, size], [0, -size]]) {
+        ctx.beginPath(); ctx.moveTo(x + ox, y + oy); ctx.lineTo(x + ox + dx, y + oy + dy); ctx.stroke()
+      }
+    }
+    // Blade strokes: darker at the base, lighter tips.
+    ctx.lineWidth = 1.6
+    for (let i = 0; i < 1400; i++) {
+      const x = rnd() * size, y = rnd() * size
+      const len = 4 + rnd() * 8
+      const dx = (rnd() - 0.5) * 3
+      ctx.strokeStyle = 'rgba(0,0,0,0.16)'
+      wrapStroke(x, y, dx * 0.6, -len * 0.6)
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+      wrapStroke(x + dx * 0.6, y - len * 0.6, dx * 0.4, -len * 0.4)
+    }
+    // Clover specks
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'
+    for (let i = 0; i < 90; i++) {
+      const x = rnd() * size, y = rnd() * size, r = 1.2 + rnd() * 1.6
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill()
     }
     tex.update(true)
     return _tile(tex)

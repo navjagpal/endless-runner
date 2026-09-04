@@ -103,6 +103,7 @@ export class Backdrop {
     switch (zoneId) {
       case 'forest': this._buildForest(statics); break
       case 'city':   this._buildCity(statics, plain); break
+      case 'railway': this._buildRailway(statics, plain); break
       case 'beach':  this._buildBeach(statics, node, animated, plain); break
       case 'space':  this._buildSpace(statics, node, animated, plain); break
       default:       this._buildMeadow(statics, node, animated, spinners); break
@@ -244,6 +245,48 @@ export class Backdrop {
     // Sun is low in the city zone, so the textured facades stay 'plain'
     // (no vertex gradient) — the windows do the work.
     for (const m of mats) plain.add(m)
+  }
+
+  // Railway: low warehouses, water towers and a couple of tall silos.
+  private _buildRailway(statics: Mesh, plain: Set<Material>): void {
+    const wall  = this._mat(new Color3(0.78, 0.62, 0.50))
+    const roof  = this._mat(new Color3(0.45, 0.42, 0.48))
+    const steel = this._mat(new Color3(0.55, 0.58, 0.62))
+    const silo  = this._mat(new Color3(0.86, 0.86, 0.84))
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 7; i++) {
+        const z = -30 + i * 36 + Math.random() * 10
+        const x = side * (48 + Math.random() * 40)
+        const w = 22 + Math.random() * 16, h = 8 + Math.random() * 6, d = 16 + Math.random() * 10
+        const b = MeshBuilder.CreateBox('warehouse', { width: w, height: h, depth: d }, this.scene)
+        b.position = new Vector3(x, h / 2 - 1, z); b.material = wall; b.parent = statics
+        const r = MeshBuilder.CreateBox('wroof', { width: w + 1.5, height: 1.2, depth: d + 1.5 }, this.scene)
+        r.position = new Vector3(x, h - 0.4, z); r.material = roof; r.parent = statics
+        if (i % 3 === 1) {
+          const tower = MeshBuilder.CreateCylinder('silo', { height: 22, diameter: 7, tessellation: 10 }, this.scene)
+          tower.position = new Vector3(x + side * 14, 10, z + 8); tower.material = silo; tower.parent = statics
+          const cap = MeshBuilder.CreateCylinder('siloCap', { height: 3, diameterBottom: 7.4, diameterTop: 1, tessellation: 10 }, this.scene)
+          cap.position = new Vector3(x + side * 14, 22.5, z + 8); cap.material = roof; cap.parent = statics
+        }
+        if (i % 3 === 2) {
+          for (const lx of [-2.5, 2.5]) {
+            const leg = MeshBuilder.CreateBox('wleg', { width: 0.6, height: 14, depth: 0.6 }, this.scene)
+            leg.position = new Vector3(x + lx, 6, z - 12); leg.material = steel; leg.parent = statics
+          }
+          const tank = MeshBuilder.CreateCylinder('wtank', { height: 6, diameter: 8, tessellation: 10 }, this.scene)
+          tank.position = new Vector3(x, 16, z - 12); tank.material = silo; tank.parent = statics
+        }
+      }
+    }
+    if (Kits.isLoaded('city')) {
+      const towers = ['low-detail-building-a', 'low-detail-building-c', 'low-detail-building-e']
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < 5; i++) {
+          Kits.place(statics, towers[i % towers.length], side * (110 + Math.random() * 50), -1, -20 + i * 50, 12 + Math.random() * 6, 0)
+        }
+      }
+    }
+    void plain
   }
 
   private _building(parent: Mesh, x: number, z: number, w: number, h: number, d: number, mat: Material): void {

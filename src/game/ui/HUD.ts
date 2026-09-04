@@ -1,7 +1,8 @@
 import {
   type GameSettings, type BestRecord, loadSettings, saveSettings, SPEED_MIN, SPEED_MAX,
 } from './Settings'
-import type { CharacterDef, Roster } from '../player/Characters'
+import type { CharacterDef, PetDef, Roster } from '../player/Characters'
+import { icon } from './Icons'
 
 export interface HudExtra {
   multiplier:      number
@@ -9,12 +10,14 @@ export interface HudExtra {
   starMeter:       number
   starActive:      boolean
   magnetRemaining: number
+  jetpackRemaining: number
+  boardRemaining:  number
   bestDistance:    number
 }
 
 export type InputAction = 'left' | 'right' | 'jump' | 'slide'
 
-const FONT = `'Nunito','Fredoka','Arial Rounded MT Bold','Segoe UI Rounded',Arial,sans-serif`
+const FONT = `'Fredoka','Nunito','Arial Rounded MT Bold','Segoe UI Rounded',Arial,sans-serif`
 
 let _cssInjected = false
 function injectCSS(): void {
@@ -27,9 +30,11 @@ function injectCSS(): void {
     @keyframes hudPulse   { 0%,100%{transform:scale(1)} 50%{transform:scale(1.12)} }
     @keyframes hudRainbow { 0%{filter:hue-rotate(0deg)} 100%{filter:hue-rotate(360deg)} }
     @keyframes hudBounce  { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
-    .hud-btn:active { transform:scale(0.92) !important; }
+    .hud-btn { position:relative; }
+    .hud-btn:active { transform:translateY(4px) !important; box-shadow:0 2px 0 rgba(0,0,0,0.3), 0 4px 10px rgba(0,0,0,0.25) !important; }
     .touch-btn { -webkit-tap-highlight-color: transparent; }
-    .touch-btn:active { transform:scale(0.9); background:rgba(255,255,255,0.45) !important; }
+    .touch-btn:active { transform:translateY(4px); background:rgba(255,255,255,0.45) !important; box-shadow:0 2px 0 rgba(0,0,0,0.3) !important; }
+    .hud-icon svg { filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35)); }
   `
   document.head.appendChild(style)
 }
@@ -59,9 +64,13 @@ export class HUD {
   private charStatus!:    HTMLDivElement
   private unlockBtn!:     HTMLButtonElement
   private bankEl!:        HTMLDivElement
-  private roster:         Roster = { selected: '', bank: 0, unlocked: [] }
+  private roster:         Roster = { selected: '', bank: 0, unlocked: [], pet: 'none', unlockedPets: ['none'] }
   private characters:     CharacterDef[] = []
   private viewIndex       = 0
+  private pets:           PetDef[] = []
+  private petIndex        = 0
+  private petName!:       HTMLDivElement
+  private petBtn!:        HTMLButtonElement
 
   private settings: GameSettings = loadSettings()
   private _openedDuringPlay = false
@@ -79,6 +88,8 @@ export class HUD {
   onCharacterUnlock?: (id: string) => void
   /** "Home" from the pause menu — back to the start screen. */
   onHome?:            () => void
+  onPetChange?:       (id: string) => void
+  onPetUnlock?:       (id: string) => void
 
   constructor() {
     injectCSS()
@@ -101,7 +112,8 @@ export class HUD {
     const distWrap = document.createElement('div')
     distWrap.style.cssText = 'display:flex;align-items:center;gap:6px;'
     const distIcon = document.createElement('span')
-    distIcon.textContent = '🏃'; distIcon.style.fontSize = '1.3rem'
+    distIcon.className = 'hud-icon'
+    distIcon.innerHTML = icon('runner', '1.5rem'); distIcon.style.fontSize = '1.3rem'
     this.distanceEl = document.createElement('span')
     this.distanceEl.style.cssText = `color:#fff;font-size:1.55rem;font-weight:900;
       text-shadow:0 2px 0 rgba(0,0,0,0.25),0 3px 10px rgba(0,0,0,0.35);min-width:4.2ch;`
@@ -114,7 +126,8 @@ export class HUD {
     this.coinWrap = document.createElement('div')
     this.coinWrap.style.cssText = 'display:flex;align-items:center;gap:6px;position:relative;'
     const coinIcon = document.createElement('span')
-    coinIcon.textContent = '🪙'; coinIcon.style.fontSize = '1.3rem'
+    coinIcon.className = 'hud-icon'
+    coinIcon.innerHTML = icon('coin', '1.6rem'); coinIcon.style.fontSize = '1.3rem'
     this.coinsEl = document.createElement('span')
     this.coinsEl.style.cssText = `color:#ffe45c;font-size:1.55rem;font-weight:900;
       text-shadow:0 2px 0 rgba(120,70,0,0.5),0 3px 10px rgba(0,0,0,0.35);min-width:2ch;`
@@ -143,12 +156,12 @@ export class HUD {
     this.container.appendChild(this.bestEl)
 
     // ── Settings button (top-left) ────────────────────────────────────────
-    this.settingsBtn = this._iconBtn('⚙️', 'top:14px;left:16px;display:none;')
+    this.settingsBtn = this._iconBtn(icon('gear', '1.5rem'), 'top:14px;left:16px;display:none;')
     this.settingsBtn.addEventListener('pointerup', () => this._openSettings())
     this.container.appendChild(this.settingsBtn)
 
     // ── Pause button (top-right) ──────────────────────────────────────────
-    this.pauseBtn = this._iconBtn('⏸', 'top:14px;right:16px;display:none;')
+    this.pauseBtn = this._iconBtn(icon('pause', '1.4rem'), 'top:14px;right:16px;display:none;')
     this.pauseBtn.addEventListener('pointerup', () => this.onPause?.())
     this.container.appendChild(this.pauseBtn)
 
@@ -159,8 +172,8 @@ export class HUD {
       display:none; flex-direction:column; align-items:center; gap:6px;
     `
     this.starLabel = document.createElement('div')
-    this.starLabel.textContent = '⭐'
-    this.starLabel.style.cssText = 'font-size:1.6rem;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4));'
+    this.starLabel.innerHTML = icon('star', '2rem')
+    this.starLabel.style.cssText = 'font-size:1.6rem;line-height:1;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4));'
     const starTrack = document.createElement('div')
     starTrack.style.cssText = `
       width:16px; height:150px; border-radius:10px; overflow:hidden;
@@ -257,7 +270,7 @@ export class HUD {
   /** Models are still loading: keep the Play button visibly waiting. */
   setReady(ready: boolean): void {
     this.playBtn.disabled = !ready
-    this.playBtn.textContent = ready ? '▶  Play!' : '⏳  Loading…'
+    this.playBtn.innerHTML = ready ? `${icon('play', '1.2em')} Play!` : '⏳  Loading…'
     this.playBtn.style.opacity = ready ? '1' : '0.7'
   }
 
@@ -274,6 +287,46 @@ export class HUD {
   /** Character currently shown in the carousel. */
   get viewedCharacter(): string { return this.characters[this.viewIndex]?.id ?? this.roster.selected }
 
+  setPets(pets: PetDef[], roster: Roster): void {
+    this.pets = pets
+    this.roster = roster
+    const idx = pets.findIndex(p => p.id === roster.pet)
+    if (!this.pets[this.petIndex]) this.petIndex = Math.max(0, idx)
+    this._renderPet()
+  }
+
+  private _cyclePet(dir: number): void {
+    if (!this.pets.length) return
+    this.petIndex = (this.petIndex + dir + this.pets.length) % this.pets.length
+    this._renderPet()
+    this.onPetChange?.(this.pets[this.petIndex].id)
+  }
+
+  private _renderPet(): void {
+    const p = this.pets[this.petIndex]
+    if (!p) return
+    const owned = this.roster.unlockedPets.includes(p.id)
+    const chosen = this.roster.pet === p.id
+    const icon = { none: '🚫', puppy: '🐶', kitten: '🐱', bunny: '🐰' }[p.id] ?? '🐾'
+    this.petName.textContent = `${icon} ${p.name}`
+    if (chosen) {
+      this.petBtn.style.display = 'none'
+    } else {
+      this.petBtn.style.display = 'inline-block'
+      const can = owned || this.roster.bank >= p.cost
+      this.petBtn.textContent = owned ? `Take ${p.name}` : can ? `🔓 🪙 ${p.cost}` : `🔒 🪙 ${p.cost}`
+      this.petBtn.style.background = owned
+        ? 'linear-gradient(135deg,#4ade80,#22d3ee)'
+        : can ? 'linear-gradient(135deg,#fbbf24,#f97316)' : 'linear-gradient(135deg,#94a3b8,#64748b)'
+    }
+  }
+
+  shakePet(): void {
+    this.petBtn.style.animation = 'none'
+    void this.petBtn.offsetWidth
+    this.petBtn.style.animation = 'hudShake 0.4s ease'
+  }
+
   private _cycleCharacter(dir: number): void {
     if (!this.characters.length) return
     this.viewIndex = (this.viewIndex + dir + this.characters.length) % this.characters.length
@@ -287,7 +340,7 @@ export class HUD {
     const owned    = this.roster.unlocked.includes(c.id)
     const selected = this.roster.selected === c.id
     this.charName.textContent = c.name
-    this.bankEl.textContent   = `🪙 ${this.roster.bank}`
+    this.bankEl.innerHTML     = `${icon('coin', '1.2em')} ${this.roster.bank}`
     if (selected) {
       this.charStatus.textContent = '✓ Ready to run!'
       this.unlockBtn.style.display = 'none'
@@ -360,16 +413,20 @@ export class HUD {
       this.starLabel.style.animation = x.starMeter > 0.85 ? 'hudPulse 0.6s ease-in-out infinite' : 'none'
     }
 
-    if (x.magnetRemaining > 0) {
+    const powers: string[] = []
+    if (x.jetpackRemaining > 0) powers.push(`<div class="hud-icon">${icon('jet', '2.2rem')}</div><div>${Math.ceil(x.jetpackRemaining)}s</div>`)
+    if (x.magnetRemaining > 0)  powers.push(`<div class="hud-icon">${icon('magnet', '2.2rem')}</div><div>${Math.ceil(x.magnetRemaining)}s</div>`)
+    if (x.boardRemaining > 0)   powers.push(`<div class="hud-icon">${icon('board', '2.2rem')}</div><div>${Math.ceil(x.boardRemaining)}s</div>`)
+    if (powers.length) {
       this.magnetEl.style.display = 'flex'
-      this.magnetEl.innerHTML = `<div style="font-size:1.8rem">🧲</div><div>${Math.ceil(x.magnetRemaining)}s</div>`
+      this.magnetEl.innerHTML = powers.join('<div style="height:10px"></div>')
     } else {
       this.magnetEl.style.display = 'none'
     }
 
-    if (x.bestDistance > 0) {
+    if (x.bestDistance > 0 && this.bestEl.style.display !== 'block') {
       this.bestEl.style.display = 'block'
-      this.bestEl.textContent = `🏆 BEST ${Math.floor(x.bestDistance)} m`
+      this.bestEl.innerHTML = `${icon('trophy', '1.1em')} BEST ${Math.floor(x.bestDistance)} m`
     }
   }
 
@@ -414,17 +471,17 @@ export class HUD {
         backdrop-filter:blur(6px); transition:transform 0.08s, background 0.08s;
         touch-action:none; ${extra}
       `
-      b.textContent = label
+      b.innerHTML = label
       const fire = (e: Event) => { e.preventDefault(); e.stopPropagation(); this.onInput?.(action) }
       b.addEventListener('pointerdown', fire)
       return b
     }
     const left = document.createElement('div')
     left.style.cssText = 'display:flex;gap:min(3vw,18px);align-items:flex-end;'
-    left.append(mk('◀', 'left'), mk('▶', 'right'))
+    left.append(mk(icon('arrowL', '0.9em'), 'left'), mk(icon('arrowR', '0.9em'), 'right'))
     const right = document.createElement('div')
     right.style.cssText = 'display:flex;flex-direction:column;gap:min(2.5vw,14px);align-items:center;'
-    right.append(mk('▲', 'jump'), mk('▼', 'slide'))
+    right.append(mk(icon('arrowU', '0.9em'), 'jump'), mk(icon('arrowD', '0.9em'), 'slide'))
     pad.append(left, right)
     return pad
   }
@@ -465,18 +522,16 @@ export class HUD {
     const playBtn = document.createElement('button')
     playBtn.className = 'hud-btn'
     playBtn.style.cssText = `
-      font-family:inherit;font-size:clamp(1.4rem,4.5vw,2.3rem);font-weight:900;
-      padding:20px 72px;border:4px solid rgba(255,255,255,0.7);border-radius:70px;cursor:pointer;
-      background:linear-gradient(135deg,#ffb347,#ff5fa2);color:#fff;
-      box-shadow:0 10px 0 rgba(160,30,90,0.6),0 16px 40px rgba(255,95,162,0.45);
-      transform:scale(1);transition:transform 0.12s,box-shadow 0.12s;pointer-events:all;
+      font-family:inherit;font-size:clamp(1.4rem,4.5vw,2.3rem);font-weight:700;
+      padding:18px 68px;border:4px solid rgba(255,255,255,0.7);border-radius:70px;cursor:pointer;
+      background:linear-gradient(180deg,#ffb347,#ff5fa2);color:#fff;
+      box-shadow:0 8px 0 rgba(160,30,90,0.6),0 16px 40px rgba(255,95,162,0.45);
+      transform:translateY(0);transition:transform 0.08s,box-shadow 0.08s;pointer-events:all;
       text-shadow:0 2px 0 rgba(0,0,0,0.2);
     `
-    playBtn.textContent = '▶  Play!'
+    playBtn.innerHTML = `${icon('play', '1.2em')} Play!`
     this.playBtn = playBtn
-    playBtn.addEventListener('pointerenter', () => { playBtn.style.transform='scale(1.06)' })
-    playBtn.addEventListener('pointerleave', () => { playBtn.style.transform='scale(1)' })
-    playBtn.addEventListener('pointerup',    () => { playBtn.style.transform='scale(1)'; this.onPlay?.() })
+    playBtn.addEventListener('pointerup', () => this.onPlay?.())
 
     const settingsLink = document.createElement('button')
     settingsLink.style.cssText = `
@@ -533,13 +588,51 @@ export class HUD {
     centre.append(this.charName, this.charStatus, this.unlockBtn)
     carousel.append(arrow('◀', -1), centre, arrow('▶', 1))
 
+    // Pet row: small arrows either side of the pet's name and a take/unlock button
+    const petRow = document.createElement('div')
+    petRow.style.cssText = `
+      display:flex; align-items:center; justify-content:center; gap:10px; margin-top:6px;
+      background:rgba(0,0,0,0.25); border:2px solid rgba(255,255,255,0.3); border-radius:40px;
+      padding:6px 12px; pointer-events:all;
+    `
+    const petArrow = (label: string, dir: number) => {
+      const b = document.createElement('button')
+      b.className = 'hud-btn'
+      b.style.cssText = `
+        font-family:inherit;font-size:1.1rem;font-weight:900;width:38px;height:38px;border-radius:50%;
+        cursor:pointer;background:rgba(255,255,255,0.22);border:2px solid rgba(255,255,255,0.6);color:#fff;
+        pointer-events:all;transition:transform 0.1s;
+      `
+      b.textContent = label
+      b.addEventListener('pointerup', (e) => { e.stopPropagation(); this._cyclePet(dir) })
+      return b
+    }
+    const petLabel = document.createElement('div')
+    petLabel.style.cssText = 'color:rgba(255,255,255,0.8);font-weight:800;font-size:0.85rem;letter-spacing:1px;'
+    petLabel.innerHTML = `${icon('paw', '1.1em')} PET`
+    this.petName = document.createElement('div')
+    this.petName.style.cssText = 'color:#fff;font-weight:900;font-size:clamp(1rem,3vw,1.25rem);min-width:7ch;text-align:center;text-shadow:0 2px 6px rgba(0,0,0,0.5);'
+    this.petBtn = document.createElement('button')
+    this.petBtn.className = 'hud-btn'
+    this.petBtn.style.cssText = `
+      display:none;font-family:inherit;font-size:0.9rem;font-weight:900;padding:6px 14px;
+      border:2px solid rgba(255,255,255,0.7);border-radius:30px;cursor:pointer;color:#fff;pointer-events:all;
+    `
+    this.petBtn.addEventListener('pointerup', (e) => {
+      e.stopPropagation()
+      const p = this.pets[this.petIndex]
+      if (p) this.onPetUnlock?.(p.id)
+    })
+    petRow.append(petLabel, petArrow('◀', -1), this.petName, petArrow('▶', 1), this.petBtn)
+    centre.append(petRow)
+
     this.bankEl = document.createElement('div')
     this.bankEl.style.cssText = `
       position:absolute;top:14px;right:16px;color:#ffe45c;font-weight:900;
       font-size:clamp(1rem,3vw,1.3rem);background:rgba(0,0,0,0.3);padding:6px 16px;border-radius:30px;
       border:2px solid rgba(255,228,92,0.45);
     `
-    this.bankEl.textContent = '🪙 0'
+    this.bankEl.innerHTML = `${icon('coin', '1.2em')} 0`
 
     const top = document.createElement('div')
     top.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;'
@@ -567,15 +660,15 @@ export class HUD {
     `
     pauseTitle.textContent = '⏸ Paused'
 
-    const resumeBtn = this._actionBtn('▶  Keep Running!', 'linear-gradient(135deg,#4ade80,#22d3ee)', 'rgba(34,211,238,0.4)')
+    const resumeBtn = this._actionBtn(`${icon('play', '1.1em')} Keep Running!`, 'linear-gradient(180deg,#4ade80,#22d3ee)', 'rgba(34,211,238,0.4)')
     resumeBtn.addEventListener('pointerup', () => this.onResume?.())
 
-    const settingsBtn = this._actionBtn('⚙️  Settings', 'linear-gradient(135deg,#818cf8,#6366f1)', 'rgba(99,102,241,0.4)')
+    const settingsBtn = this._actionBtn(`${icon('gear', '1.1em')} Settings`, 'linear-gradient(180deg,#818cf8,#6366f1)', 'rgba(99,102,241,0.4)')
     settingsBtn.style.fontSize = 'clamp(0.95rem,2.5vw,1.3rem)'
     settingsBtn.style.padding  = '12px 44px'
     settingsBtn.addEventListener('pointerup', () => this._openSettings(true))
 
-    const homeBtn = this._actionBtn('🏠  Home', 'linear-gradient(135deg,#f472b6,#fb923c)', 'rgba(251,146,60,0.4)')
+    const homeBtn = this._actionBtn(`${icon('home', '1.1em')} Home`, 'linear-gradient(180deg,#f472b6,#fb923c)', 'rgba(251,146,60,0.4)')
     homeBtn.style.fontSize = 'clamp(0.95rem,2.5vw,1.3rem)'
     homeBtn.style.padding  = '12px 44px'
     homeBtn.addEventListener('pointerup', () => this.onHome?.())
@@ -725,6 +818,7 @@ export class HUD {
   // ─── UI component helpers ────────────────────────────────────────────────
 
   private _iconBtn(icon: string, extraCss: string): HTMLButtonElement {
+    // (icon is an SVG string)
     const btn = document.createElement('button')
     btn.className = 'hud-btn'
     btn.style.cssText = `
@@ -736,7 +830,7 @@ export class HUD {
       font-size:1.35rem;align-items:center;justify-content:center;
       pointer-events:all;transition:transform 0.12s,background 0.12s;
     `
-    btn.textContent = icon
+    btn.innerHTML = icon
     btn.addEventListener('pointerenter', () => { btn.style.background='rgba(255,255,255,0.32)' })
     btn.addEventListener('pointerleave', () => { btn.style.background='rgba(255,255,255,0.18)' })
     return btn
@@ -749,13 +843,11 @@ export class HUD {
       font-family:inherit;font-size:clamp(1.1rem,3.5vw,1.8rem);font-weight:900;
       padding:16px 56px;border:3px solid rgba(255,255,255,0.6);border-radius:60px;cursor:pointer;
       background:${bg};color:#fff;
-      box-shadow:0 8px 32px ${shadow};
-      transform:scale(1);transition:transform 0.12s,box-shadow 0.12s;pointer-events:all;
+      box-shadow:0 6px 0 rgba(0,0,0,0.28), 0 12px 28px ${shadow};
+      transform:translateY(0);transition:transform 0.08s,box-shadow 0.08s;pointer-events:all;
       text-shadow:0 2px 0 rgba(0,0,0,0.2);
     `
-    btn.textContent = label
-    btn.addEventListener('pointerenter', () => { btn.style.transform='scale(1.05)' })
-    btn.addEventListener('pointerleave', () => { btn.style.transform='scale(1)' })
+    btn.innerHTML = label
     return btn
   }
 

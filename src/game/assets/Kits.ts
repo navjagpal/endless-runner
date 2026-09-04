@@ -26,7 +26,7 @@ import { PBRCustomMaterial } from '@babylonjs/materials'
  * procedural primitives they always had.
  */
 
-export type KitName = 'vehicles' | 'nature' | 'city'
+export type KitName = 'vehicles' | 'nature' | 'city' | 'trains'
 
 interface Template {
   meshes: Mesh[]

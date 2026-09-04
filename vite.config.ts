@@ -30,7 +30,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,glb,gltf,ogg}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,glb,gltf,ogg,ttf}'],
         // Twelve characters at ~150 KB each: the chosen one is fetched on
         // demand and kept in a runtime cache rather than precached.
         globIgnores: ['**/models/characters/**'],

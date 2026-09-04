@@ -16,7 +16,7 @@ import { getQualityProfile } from '../core/DeviceTier'
 import { getCoinTexture } from '../fx/Textures'
 import { Kits } from '../assets/Kits'
 import { terrainY, terrainSlope } from '../track/Terrain'
-import { Player } from '../player/Player'
+import { Player, FLY_HEIGHT } from '../player/Player'
 
 const SPAWN_AHEAD    = 70
 const DESPAWN_BEHIND = 22
@@ -44,6 +44,12 @@ const COIN_Y = 1.10
 // deposits the player on the real roof. Only the box truck gets a ramp:
 // the fire truck's ladder and the ambulance's light bar aren't runnable.
 const CAR_MODELS   = ['sedan', 'sedan-sports', 'hatchback-sports', 'suv', 'taxi', 'police', 'van', 'race']
+// Every train unit is scaled to TRUCK_ROOF so the roof runs level from the
+// last carriage's ramp to the locomotive's nose.
+const TRAIN_ENGINES   = ['train-electric-bullet-a', 'train-electric-bullet-b', 'train-electric-city-a', 'train-diesel-a']
+const TRAIN_CARRIAGES = ['train-carriage-box', 'train-carriage-container-red', 'train-carriage-container-blue',
+  'train-carriage-container-green', 'train-carriage-tank', 'train-carriage-lumber', 'train-carriage-coal']
+const TRAIN_GAP = 0.35
 const TRUCK_MODELS = ['delivery', 'firetruck', 'ambulance']
 const RAMP_TRUCK   = 'delivery'
 // The kit vehicles arrive facing the camera; turned round so the traffic
@@ -109,7 +115,8 @@ interface Coin {
 
 interface SpilledCoin { mesh: InstancedMesh; vel: Vector3; life: number }
 
-interface Pickup { mesh: Mesh; kind: 'magnet'; collected: boolean; bobOffset: number }
+type PickupKind = 'magnet' | 'jetpack' | 'board'
+interface Pickup { mesh: Mesh; kind: PickupKind; collected: boolean; bobOffset: number }
 
 export interface RunEvents {
   /** The player hit something and it counted (not invincible). */
@@ -119,6 +126,8 @@ export interface RunEvents {
   /** An obstacle went by without a bump. */
   onDodge:   () => void
   onMagnet:  () => void
+  onJetpack: () => void
+  onBoard:   () => void
   /** The player just got onto a vehicle roof. */
   onRooftop: () => void
 }
@@ -221,6 +230,8 @@ export class ObstacleManager {
   private nextObstacleZ = 38
   private nextCoinZ     = 16
   private nextPickupZ   = 140
+  private nextJetpackZ  = 330
+  private nextBoardZ    = 220
   private time          = 0
   private magnetTimer   = 0
   private starPower     = false
@@ -248,10 +259,18 @@ export class ObstacleManager {
    * Returns the extra z-length the spawned obstacle wants after it (ramps
    * need breathing room so the player can line up with them).
    */
-  private _spawnObstacle(z: number, kidMode: boolean): number {
+  private _spawnObstacle(z: number, kidMode: boolean, zoneId: string): number {
     const roll = Math.random()
     let obs: Obstacle
     let extraGap = 0
+
+    if (zoneId === 'railway' && Kits.isLoaded('trains') && roll >= 0.30) {
+      // A train: 2–4 units in one lane, ramp at the back, roof all the way.
+      const lane  = Math.floor(Math.random() * 3)
+      const units = kidMode ? 2 + Math.floor(Math.random() * 2) : 2 + Math.floor(Math.random() * 3)
+      const ramped = Math.random() < (kidMode ? 0.7 : 0.5)
+      return this._spawnTrain(z, LANE_POSITIONS[lane], lane, units, ramped)
+    }
 
     if (roll < 0.20) {
       // Low barrier — must be jumped. A coin arc over it shows the way.
@@ -642,104 +661,88 @@ export class ObstacleManager {
     root.position = new Vector3(x, 0, z)
 
     const busMat    = _pbr(this.scene, new Color3(1.00, 0.80, 0.05), 0.04, 0.60)  // school bus yellow
-    const darkMat   = _pbr(this.scene, new Color3(0.08, 0.08, 0.10), 0.10, 0.85)
-    const chromeMat = _pbr(this.scene, new Color3(0.80, 0.80, 0.84), 0.90, 0.10)
+    const darkMat   = _pbr(this.scene, new Color3(0.10, 0.10, 0.12), 0.10, 0.85)
+    const chromeMat = _pbr(this.scene, new Color3(0.82, 0.82, 0.86), 0.90, 0.10)
     const hlMat     = _emissive(this.scene, new Color3(1.00, 0.97, 0.88))
     const tlMat     = _emissive(this.scene, new Color3(0.95, 0.04, 0.04))
-    const winMat    = _emissive(this.scene, new Color3(0.60, 0.72, 0.90))
+    const winMat    = _emissive(this.scene, new Color3(0.62, 0.78, 0.95))
     const stopMat   = _emissive(this.scene, new Color3(0.92, 0.05, 0.05))
+    const signMat   = _emissive(this.scene, new Color3(0.15, 0.15, 0.15))
 
-    const frame = MeshBuilder.CreateBox('frame', { width: 3.30, height: 0.26, depth: 3.90 }, this.scene)
-    frame.position = new Vector3(0, 0.22, 0)
-    frame.material = darkMat; frame.parent = root
-
-    const body = MeshBuilder.CreateBox('body', { width: 3.40, height: 1.80, depth: 3.90 }, this.scene)
-    body.position = new Vector3(0, 1.25, 0)
+    // Body with a rounded roof: a box plus a flattened cylinder along z.
+    const body = MeshBuilder.CreateBox('body', { width: 3.30, height: 1.55, depth: 3.90 }, this.scene)
+    body.position = new Vector3(0, 1.12, 0)
     body.material = busMat; body.receiveShadows = true; body.parent = root
-
-    const roof = MeshBuilder.CreateBox('roof', { width: 3.44, height: 0.14, depth: 3.94 }, this.scene)
-    roof.position = new Vector3(0, 2.17, 0)
+    const roof = MeshBuilder.CreateCylinder('roof', { diameter: 3.30, height: 3.90, tessellation: 12 }, this.scene)
+    roof.rotation.x = Math.PI / 2
+    roof.scaling.y = 1
+    roof.scaling.x = 1
+    roof.position = new Vector3(0, 1.90, 0)
+    roof.scaling = new Vector3(1, 1, 0.22)     // local y is along z after the rotation; z is now up
     roof.material = busMat; roof.parent = root
+    // Rounded nose
+    const nose = MeshBuilder.CreateCylinder('nose', { diameter: 1.55, height: 3.30, tessellation: 12 }, this.scene)
+    nose.rotation.z = Math.PI / 2
+    nose.position = new Vector3(0, 1.12, 1.95)
+    nose.scaling = new Vector3(1, 1, 0.55)
+    nose.material = busMat; nose.parent = root
 
-    for (const vz of [-0.8, 0.2]) {
-      const vent = MeshBuilder.CreateBox('vent', { width: 0.60, height: 0.14, depth: 0.42 }, this.scene)
-      vent.position = new Vector3(0, 2.32, vz)
-      vent.material = darkMat; vent.parent = root
-    }
-
-    const skirt = MeshBuilder.CreateBox('skirt', { width: 3.42, height: 0.28, depth: 3.92 }, this.scene)
-    skirt.position = new Vector3(0, 0.50, 0)
+    // Black skirt and the classic side band
+    const skirt = MeshBuilder.CreateBox('skirt', { width: 3.36, height: 0.30, depth: 3.96 }, this.scene)
+    skirt.position = new Vector3(0, 0.45, 0)
     skirt.material = darkMat; skirt.parent = root
-
-    // Black side stripe under the windows — the classic school-bus band.
     for (const sx of [-1, 1]) {
-      const band = MeshBuilder.CreateBox('band', { width: 0.05, height: 0.12, depth: 3.80 }, this.scene)
-      band.position = new Vector3(sx * 1.72, 1.22, 0)
+      const band = MeshBuilder.CreateBox('band', { width: 0.05, height: 0.14, depth: 3.80 }, this.scene)
+      band.position = new Vector3(sx * 1.67, 1.12, 0)
       band.material = darkMat; band.parent = root
-    }
-
-    for (const sx of [-1, 1]) {
+      // One long window band instead of separate panes
+      const win = MeshBuilder.CreateBox('win', { width: 0.06, height: 0.55, depth: 3.30 }, this.scene)
+      win.position = new Vector3(sx * 1.68, 1.58, -0.15)
+      win.material = winMat; win.parent = root
+      // Window mullions
       for (let i = 0; i < 4; i++) {
-        const win = MeshBuilder.CreateBox('win', { width: 0.06, height: 0.50, depth: 0.60 }, this.scene)
-        win.position = new Vector3(sx * 1.73, 1.60, -1.30 + i * 0.84)
-        win.material = winMat; win.parent = root
+        const m = MeshBuilder.CreateBox('mullion', { width: 0.07, height: 0.55, depth: 0.08 }, this.scene)
+        m.position = new Vector3(sx * 1.685, 1.58, -1.5 + i * 0.85)
+        m.material = busMat; m.parent = root
       }
     }
 
-    const fws = MeshBuilder.CreateBox('fws', { width: 2.60, height: 0.60, depth: 0.06 }, this.scene)
-    fws.position = new Vector3(0, 1.68, 1.98)
-    fws.material = glassMat; fws.parent = root
+    const fws = MeshBuilder.CreateBox('fws', { width: 2.60, height: 0.62, depth: 0.06 }, this.scene)
+    fws.position = new Vector3(0, 1.62, 1.98); fws.material = winMat; fws.parent = root
+    const rws = MeshBuilder.CreateBox('rws', { width: 1.90, height: 0.58, depth: 0.06 }, this.scene)
+    rws.position = new Vector3(0, 1.62, -1.98); rws.material = winMat; rws.parent = root
 
-    const destSign = MeshBuilder.CreateBox('dest', { width: 2.60, height: 0.22, depth: 0.06 }, this.scene)
-    destSign.position = new Vector3(0, 2.05, 1.98)
-    destSign.material = darkMat; destSign.parent = root
-
-    const rws = MeshBuilder.CreateBox('rws', { width: 1.80, height: 0.55, depth: 0.06 }, this.scene)
-    rws.position = new Vector3(0, 1.68, -1.98)
-    rws.material = glassMat; rws.parent = root
-
+    // SCHOOL BUS sign strip front and back
+    for (const bz of [1.99, -1.99]) {
+      const sign = MeshBuilder.CreateBox('sign', { width: 2.2, height: 0.22, depth: 0.05 }, this.scene)
+      sign.position = new Vector3(0, 2.05, bz); sign.material = signMat; sign.parent = root
+    }
     for (const hx of [-1.22, 1.22]) {
-      const hl = MeshBuilder.CreateBox('hl', { width: 0.42, height: 0.22, depth: 0.06 }, this.scene)
-      hl.position = new Vector3(hx, 0.90, 1.98)
-      hl.material = hlMat; hl.parent = root
+      const hl = MeshBuilder.CreateSphere('hl', { diameter: 0.34, segments: 6 }, this.scene)
+      hl.position = new Vector3(hx, 0.90, 2.02); hl.material = hlMat; hl.parent = root
+      const tl = MeshBuilder.CreateBox('tl', { width: 0.40, height: 0.24, depth: 0.06 }, this.scene)
+      tl.position = new Vector3(hx, 0.90, -1.98); tl.material = tlMat; tl.parent = root
+      // Amber roof lights
+      const amber = MeshBuilder.CreateSphere('amber', { diameter: 0.22, segments: 5 }, this.scene)
+      amber.position = new Vector3(hx, 2.30, -1.75); amber.material = _emissive(this.scene, new Color3(1, 0.6, 0.05)); amber.parent = root
     }
-
-    for (const tx of [-1.22, 1.22]) {
-      const tl = MeshBuilder.CreateBox('tl', { width: 0.44, height: 0.22, depth: 0.06 }, this.scene)
-      tl.position = new Vector3(tx, 0.90, -1.98)
-      tl.material = tlMat; tl.parent = root
+    for (const bz of [2.10, -2.06]) {
+      const bump = MeshBuilder.CreateBox('bumper', { width: 3.40, height: 0.26, depth: 0.18 }, this.scene)
+      bump.position = new Vector3(0, 0.42, bz); bump.material = chromeMat; bump.parent = root
     }
-
-    const fBump = MeshBuilder.CreateBox('fbump', { width: 3.40, height: 0.24, depth: 0.18 }, this.scene)
-    fBump.position = new Vector3(0, 0.42, 2.06)
-    fBump.material = chromeMat; fBump.parent = root
-
-    const rBump = MeshBuilder.CreateBox('rbump', { width: 3.40, height: 0.24, depth: 0.18 }, this.scene)
-    rBump.position = new Vector3(0, 0.42, -2.06)
-    rBump.material = chromeMat; rBump.parent = root
-
-    const door = MeshBuilder.CreateBox('door', { width: 0.06, height: 1.50, depth: 0.74 }, this.scene)
-    door.position = new Vector3(1.73, 1.00, 1.32)
-    door.material = darkMat; door.parent = root
-
-    const doorWin = MeshBuilder.CreateBox('doorwin', { width: 0.06, height: 0.44, depth: 0.36 }, this.scene)
-    doorWin.position = new Vector3(1.73, 1.50, 1.32)
-    doorWin.material = winMat; doorWin.parent = root
-
-    const stop = MeshBuilder.CreateCylinder('stop', { diameter: 0.50, height: 0.07, tessellation: 8 }, this.scene)
+    const door = MeshBuilder.CreateBox('door', { width: 0.06, height: 1.45, depth: 0.74 }, this.scene)
+    door.position = new Vector3(1.68, 1.05, 1.30); door.material = darkMat; door.parent = root
+    const stop = MeshBuilder.CreateCylinder('stop', { diameter: 0.55, height: 0.07, tessellation: 8 }, this.scene)
     stop.rotation.x = Math.PI / 2
-    stop.position   = new Vector3(-1.76, 1.42, 0.50)
-    stop.material   = stopMat; stop.parent = root
+    stop.position = new Vector3(-1.78, 1.45, 0.50); stop.material = stopMat; stop.parent = root
 
-    const stopRing = MeshBuilder.CreateCylinder('stopRing', { diameter: 0.54, height: 0.04, tessellation: 8 }, this.scene)
-    stopRing.rotation.x = Math.PI / 2
-    stopRing.position   = new Vector3(-1.76, 1.42, 0.50)
-    stopRing.material   = _emissive(this.scene, new Color3(1.0, 1.0, 1.0))
-    stopRing.parent     = root
-
+    // Wheels with dark arches
     const wR = 0.42, wW = 0.26
-    for (const [wx, wz] of [[-1.62, 1.48], [1.62, 1.48], [-1.62, -1.38], [1.62, -1.38]]) {
+    for (const [wx, wz] of [[-1.60, 1.45], [1.60, 1.45], [-1.60, -1.38], [1.60, -1.38]]) {
       this._addWheel(root, new Vector3(wx, wR, wz), wR, wW)
+      const arch = MeshBuilder.CreateBox('arch', { width: 0.30, height: 0.55, depth: 1.20 }, this.scene)
+      arch.position = new Vector3(Math.sign(wx) * 1.62, 0.62, wz)
+      arch.material = darkMat; arch.parent = root
     }
 
     let surface: Surface | undefined
@@ -762,6 +765,69 @@ export class ObstacleManager {
     }
 
     return { mesh: root, collW: 1.55, collD: 1.60, bottom: 0, top: BUS_ROOF, surface, lanes, passed: false, bumped: false }
+  }
+
+  // ─── Train ────────────────────────────────────────────────────────────────
+  //
+  // One obstacle per unit so collision stays per-box, but the rooftop
+  // surfaces abut, and _groundUnderPlayer takes the highest — so a player
+  // who rides the ramp runs the whole train and drops off the nose.
+  //
+  private _spawnTrain(z: number, x: number, lane: number, units: number, ramped: boolean): number {
+    let cursor = z
+    let totalLen = 0
+    for (let i = 0; i < units; i++) {
+      const isEngine = i === units - 1
+      const model = isEngine
+        ? TRAIN_ENGINES[Math.floor(Math.random() * TRAIN_ENGINES.length)]
+        : TRAIN_CARRIAGES[Math.floor(Math.random() * TRAIN_CARRIAGES.length)]
+      const size  = Kits.size(model)!
+      const scale = TRUCK_ROOF / size.y
+      const depth = size.z * scale
+      const unitZ = cursor + depth / 2
+      const root  = new Mesh('train', this.scene)
+      root.position = new Vector3(x, 0, unitZ)
+      const placed = Kits.place(root, model, 0, 0, 0, scale, VEHICLE_YAW)!
+      let surface: Surface | undefined
+      const widthX = placed.x
+      if (ramped && i === 0) {
+        const rampLength = 3.6
+        const rampLocalZ = -depth / 2 + 0.05
+        this._addRamp(root, 0, rampLocalZ, rampLength, TRUCK_ROOF, widthX)
+        surface = {
+          rampStartZ: unitZ + rampLocalZ - rampLength,
+          rampEndZ:   unitZ + rampLocalZ,
+          topEndZ:    unitZ + depth / 2 - (isEngine ? 0.9 : 0),
+          xMin: x - widthX / 2, xMax: x + widthX / 2, topY: TRUCK_ROOF,
+        }
+      } else if (ramped) {
+        surface = {
+          rampStartZ: unitZ - depth / 2 - TRAIN_GAP - 0.01,
+          rampEndZ:   unitZ - depth / 2 - TRAIN_GAP,
+          topEndZ:    unitZ + depth / 2 - (isEngine ? 0.9 : 0),
+          xMin: x - widthX / 2, xMax: x + widthX / 2, topY: TRUCK_ROOF,
+        }
+      }
+      const obs: Obstacle = {
+        mesh: root, collW: 0.94, collD: depth / 2 - 0.1, bottom: 0, top: TRUCK_ROOF, surface,
+        lanes: [lane], passed: false, bumped: false,
+      }
+      styleChunk(root, {
+        plainMaterials: _emissiveMaterials(),
+        preShadedMaterials: Kits.materials,
+        flatShade: getQualityProfile().flatShade,
+        gradient: { bottom: 0.80, top: 1.08 },
+      })
+      root.position.y = terrainY(unitZ)
+      root.rotation.x = -Math.atan(terrainSlope(unitZ))
+      this.obstacles.push(obs)
+      if (surface) this._spawnRooftopCoins(surface, i === 0)
+      cursor += depth + TRAIN_GAP
+      totalLen += depth + TRAIN_GAP
+    }
+    // Room to line up with the ramp, plus the train's own length beyond
+    // the spawn point (the caller's gap is measured from `z`).
+    return totalLen + (ramped ? 6 : 2)
   }
 
   // ─── Ramp builder ─────────────────────────────────────────────────────────
@@ -918,11 +984,11 @@ export class ObstacleManager {
 
   // Spawns a trail of coins up the ramp and across the rooftop — the big
   // reward for a kid who takes the ramp.
-  private _spawnRooftopCoins(s: Surface): void {
+  private _spawnRooftopCoins(s: Surface, withRamp = true): void {
     const centerX = (s.xMin + s.xMax) / 2
     const step    = 1.3
 
-    for (let z = s.rampStartZ + 0.6; z < s.rampEndZ; z += step) {
+    if (withRamp) for (let z = s.rampStartZ + 0.6; z < s.rampEndZ; z += step) {
       const t = (z - s.rampStartZ) / (s.rampEndZ - s.rampStartZ)
       this._addCoin(centerX, 0.6 + t * s.topY, z, z * 0.3)
     }
@@ -973,11 +1039,59 @@ export class ObstacleManager {
     return { mesh: root, kind: 'magnet', collected: false, bobOffset: Math.random() * 6 }
   }
 
-  private _spawnPickup(z: number): void {
+  private _spawnPickup(z: number, kind: PickupKind = 'magnet'): void {
     const lanes = [0, 1, 2].filter(l => !this._laneBlocked(l, z, 4))
     if (!lanes.length) return
     const lane = lanes[Math.floor(Math.random() * lanes.length)]
-    this.pickups.push(this._makeMagnet(LANE_POSITIONS[lane], z))
+    const x = LANE_POSITIONS[lane]
+    if (kind === 'magnet')  this.pickups.push(this._makeMagnet(x, z))
+    if (kind === 'jetpack') this.pickups.push(this._makeJetpackPickup(x, z))
+    if (kind === 'board')   this.pickups.push(this._makeBoardPickup(x, z))
+  }
+
+  private _makeJetpackPickup(x: number, z: number): Pickup {
+    const root = new Mesh('jetpackPickup', this.scene)
+    root.position = new Vector3(x, COIN_Y + 0.2, z)
+    const tank = _pbr(this.scene, new Color3(0.78, 0.80, 0.85), 0.6, 0.35)
+    const cap  = _pbr(this.scene, new Color3(0.95, 0.25, 0.20), 0.1, 0.6)
+    const glow = _emissive(this.scene, new Color3(1.0, 0.7, 0.3))
+    for (const sx of [-0.2, 0.2]) {
+      const t = MeshBuilder.CreateCylinder('ptank', { diameter: 0.3, height: 0.7, tessellation: 10 }, this.scene)
+      t.position.set(sx, 0, 0); t.material = tank; t.parent = root
+      const c = MeshBuilder.CreateCylinder('pcap', { diameterTop: 0.1, diameterBottom: 0.3, height: 0.18, tessellation: 10 }, this.scene)
+      c.position.set(sx, 0.44, 0); c.material = cap; c.parent = root
+      const f = MeshBuilder.CreateCylinder('pflame', { diameterTop: 0.05, diameterBottom: 0.22, height: 0.3, tessellation: 8 }, this.scene)
+      f.rotation.x = Math.PI
+      f.position.set(sx, -0.5, 0); f.material = glow; f.parent = root
+    }
+    const ring = MeshBuilder.CreateTorus('pring', { diameter: 1.5, thickness: 0.05, tessellation: 20 }, this.scene)
+    ring.material = glow; ring.parent = root
+    return { mesh: root, kind: 'jetpack', collected: false, bobOffset: Math.random() * 6 }
+  }
+
+  private _makeBoardPickup(x: number, z: number): Pickup {
+    const root = new Mesh('boardPickup', this.scene)
+    root.position = new Vector3(x, COIN_Y + 0.1, z)
+    const deck = MeshBuilder.CreateBox('pdeck', { width: 0.9, height: 0.1, depth: 1.6 }, this.scene)
+    deck.material = _pbr(this.scene, new Color3(0.98, 0.35, 0.65), 0.1, 0.5); deck.parent = root
+    deck.rotation.z = 0.35
+    const stripe = MeshBuilder.CreateBox('pstripe', { width: 0.94, height: 0.04, depth: 0.9 }, this.scene)
+    stripe.material = _emissive(this.scene, new Color3(0.4, 0.95, 1.0)); stripe.parent = deck; stripe.position.y = -0.06
+    const ring = MeshBuilder.CreateTorus('pring', { diameter: 1.5, thickness: 0.05, tessellation: 20 }, this.scene)
+    ring.material = _emissive(this.scene, new Color3(0.4, 0.95, 1.0)); ring.parent = root
+    return { mesh: root, kind: 'board', collected: false, bobOffset: Math.random() * 6 }
+  }
+
+  /**
+   * A high trail for a jetpack flight: coins at cruise height wandering
+   * across the lanes for as far as the flight will carry.
+   */
+  spawnSkyCoins(fromZ: number, metres: number): void {
+    let lane = 1
+    for (let z = fromZ + 6, i = 0; z < fromZ + metres; z += 1.6, i++) {
+      if (i % 7 === 0) lane = Math.floor(Math.random() * 3)
+      this._addCoin(LANE_POSITIONS[lane], FLY_HEIGHT + 0.5 + Math.sin(i * 0.5) * 0.4, z, i * 0.3)
+    }
   }
 
   // ─── Ground query ─────────────────────────────────────────────────────────
@@ -1005,7 +1119,7 @@ export class ObstacleManager {
 
   // ─── Update ────────────────────────────────────────────────────────────────
 
-  update(player: Player, playerZ: number, dt: number, speed: number, kidMode: boolean, ev: RunEvents): void {
+  update(player: Player, playerZ: number, dt: number, speed: number, kidMode: boolean, ev: RunEvents, zoneId = 'meadow', petPos: Vector3 | null = null): void {
     this.time += dt
     if (this.magnetTimer > 0) this.magnetTimer -= dt
 
@@ -1015,7 +1129,7 @@ export class ObstacleManager {
     const gapSecs = kidMode ? 1.35 : 0.95
     const minGap  = kidMode ? 15 : 12
     while (this.nextObstacleZ < playerZ + SPAWN_AHEAD) {
-      const extraGap = this._spawnObstacle(this.nextObstacleZ, kidMode)
+      const extraGap = this._spawnObstacle(this.nextObstacleZ, kidMode, zoneId)
       this.nextObstacleZ += Math.max(minGap, speed * gapSecs) + Math.random() * speed * 0.6 + extraGap
     }
     while (this.nextCoinZ < playerZ + SPAWN_AHEAD) {
@@ -1023,8 +1137,16 @@ export class ObstacleManager {
       this.nextCoinZ += 9 + Math.random() * 7
     }
     while (this.nextPickupZ < playerZ + SPAWN_AHEAD) {
-      this._spawnPickup(this.nextPickupZ)
+      this._spawnPickup(this.nextPickupZ, 'magnet')
       this.nextPickupZ += kidMode ? 170 + Math.random() * 90 : 260 + Math.random() * 140
+    }
+    while (this.nextJetpackZ < playerZ + SPAWN_AHEAD) {
+      this._spawnPickup(this.nextJetpackZ, 'jetpack')
+      this.nextJetpackZ += kidMode ? 380 + Math.random() * 160 : 520 + Math.random() * 220
+    }
+    while (this.nextBoardZ < playerZ + SPAWN_AHEAD) {
+      this._spawnPickup(this.nextBoardZ, 'board')
+      this.nextBoardZ += kidMode ? 300 + Math.random() * 120 : 420 + Math.random() * 160
     }
 
     const pp = player.position
@@ -1113,6 +1235,10 @@ export class ObstacleManager {
         coin.collected      = true
         coin.mesh.isVisible = false
         ev.onCoin(cp.clone())
+      } else if (petPos && Math.abs(petPos.x - cp.x) < 0.9 && Math.abs(petPos.z - cp.z) < 0.9 && Math.abs(cp.y - petPos.y) < 1.1) {
+        coin.collected      = true
+        coin.mesh.isVisible = false
+        ev.onCoin(cp.clone())
       }
     }
 
@@ -1143,8 +1269,9 @@ export class ObstacleManager {
       p.mesh.rotation.y += dt * 2.2
       if (Math.abs(pp.x - mp.x) < 1.1 && Math.abs(pp.z - mp.z) < 1.1 && Math.abs(mp.y - centerY) < 1.5) {
         p.collected = true
-        this.magnetTimer = 9
-        ev.onMagnet()
+        if (p.kind === 'magnet')  { this.magnetTimer = 9; ev.onMagnet() }
+        if (p.kind === 'jetpack') ev.onJetpack()
+        if (p.kind === 'board')   ev.onBoard()
       }
     }
   }
@@ -1161,6 +1288,8 @@ export class ObstacleManager {
     this.nextObstacleZ  = 38
     this.nextCoinZ      = 16
     this.nextPickupZ    = 140
+    this.nextJetpackZ   = 330
+    this.nextBoardZ     = 220
     this.magnetTimer    = 0
     this.starPower      = false
     this.lastOnObstacle = null

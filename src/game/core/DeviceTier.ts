@@ -38,6 +38,8 @@ export interface QualityProfile {
   fxaa: boolean
   /** Scales every particle system's capacity. */
   particleScale: number
+  /** Depth-based screen-space outlines: a full-screen pass plus a depth prepass. */
+  outline: boolean
   /** Camera far plane — shorter draws less. */
   maxZ: number
   /**
@@ -67,6 +69,7 @@ const PROFILES: Record<Tier, Omit<QualityProfile, 'tier' | 'reason'>> = {
     bloomKernel: 32,
     fxaa: true,
     particleScale: 0.4,
+    outline: false,
     maxZ: 220,
     flatShade: true,
   },
@@ -82,6 +85,7 @@ const PROFILES: Record<Tier, Omit<QualityProfile, 'tier' | 'reason'>> = {
     bloomKernel: 64,
     fxaa: true,
     particleScale: 0.8,
+    outline: false,
     maxZ: 300,
     flatShade: true,
   },
@@ -97,6 +101,7 @@ const PROFILES: Record<Tier, Omit<QualityProfile, 'tier' | 'reason'>> = {
     bloomKernel: 128,
     fxaa: true,
     particleScale: 1.0,
+    outline: true,
     maxZ: 350,
     flatShade: true,
   },
@@ -133,6 +138,11 @@ function _isFireTablet(ua: string): boolean {
 }
 
 function _classify(): { tier: Tier; reason: string } {
+  // `?tier=high` for one-off checks (headless captures of the outline pass).
+  try {
+    const q = new URLSearchParams(location.search).get('tier')
+    if (q === 'low' || q === 'mid' || q === 'high') return { tier: q, reason: 'forced via ?tier' }
+  } catch { /* no location */ }
   const stored = (() => {
     try { return localStorage.getItem(OVERRIDE_KEY) } catch { return null }
   })()

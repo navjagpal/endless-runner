@@ -21,29 +21,26 @@ makes Subway Surfers feel exciting.
       the player falls back to the road after running off the front end.
       Implemented via per-obstacle `surface` bounds + a grace period so
       falling off the front doesn't insta-bump the cab.
-- [ ] **Multi-car "trains"** — 2–3 buses/trucks in a row with ramps front and
-      back. The player can run the full length up top.
+- [x] **Multi-car "trains"** — Railway zone: 2–4 Kenney train units per set, ramp at the back, roof runs the full length.
 - [ ] **Rainbow bridges / arches** — Decorative curved overpasses the player
       runs under.
 - [x] **Hills & dips** — Rolling hills (visual; gameplay stays flat). No dips: the far ground would show.
-- [ ] **Tunnels with glowing lights** — Brief enclosed sections that feel cozy,
-      not scary.
-- [ ] **Banked / curving road** — Road visually curves left/right even though
-      lane gameplay stays linear.
+- [x] **Tunnels with glowing lights** — Rock tunnels in the forest with ceiling lamps.
+- [x] **Curving road** — Vertex-shader bend; lanes and physics stay straight.
 
 ## 🦸 2. Character & Customization
 
 - [~] **Characters** — Twelve Kenney chibis, unlockable with the coin bank. Animals would need another pack.
 - [~] **Coin-purchased characters** — Done for whole characters; outfits not yet.
-- [ ] **Pet companion** — A small dog/cat that runs alongside the player.
+- [x] **Pet companion** — Puppy, kitten, bunny; collects coins it touches.
 - [ ] **Nameable character** — Personal touch.
 
 ## ⚡ 3. Power-ups
 
 - [x] **Coin magnet** — Pickup on the track; pulls coins in for 9 seconds.
-- [ ] **Jetpack** — Flies above obstacles along a trail of coins.
+- [x] **Jetpack** — Flies above obstacles along a trail of coins.
 - [x] **Coin multiplier** — x2/x3/x4 for a clean coin streak, reset on a bump.
-- [ ] **Hoverboard / scooter** — Absorbs one collision before breaking.
+- [x] **Hoverboard** — Absorbs one collision before breaking.
 - [x] **Rainbow star** — Star Power: fill the ⭐ meter with dodges; ~7 s invincible + magnet + rainbow trail.
 
 ## 🌟 4. Collectibles Beyond Coins
@@ -56,7 +53,7 @@ makes Subway Surfers feel exciting.
 ## 🎨 5. Environment Polish
 
 - [~] **Friendly animals in scenery** — Birds and butterflies; no ground animals yet.
-- [~] **Weather events** — Drifting petals (meadow), leaves (forest), sparkles (space).
+- [x] **Weather events** — Rain then a rainbow in the forest, snowy forest variant, petals/leaves/sparkles, golden-hour sweep.
 - [ ] **Candy-land biome** — Lollipops, gingerbread road, marshmallow clouds.
 - [ ] **Underwater biome** — Soft blue filter, bubbles, fish.
 - [~] **Animated billboards** — City billboards have smiley faces (static).

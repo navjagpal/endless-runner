@@ -6,6 +6,15 @@ A high-quality 3D endless runner PWA built with Babylon.js — inspired by Subwa
 
 ## Features
 
+- **Toon look** — a material plugin bands the lighting into three tones with a rim highlight on
+  every material, a depth-based outline pass on the high tier, contact shadows baked into the
+  verge under every prop, and the road bends left and right ahead (vertex shader; lanes stay straight)
+- **Six worlds** — Meadow → Forest → City → Railway → Beach → Space, with a golden-hour sweep at the
+  end of the meadow, rain then a rainbow at the start of the forest, and a snowy forest two runs in five
+- **Landmarks** — rock tunnels in the forest, a causeway bridge on the beach, overpasses in the city
+- **Trains** — the railway zone runs Kenney train sets in the lanes; ride the ramp and run the whole roof
+- **Pets** — a puppy, kitten or bunny bounds at your heel and collects the coins you miss (coin bank unlock)
+- **Jetpack and hoverboard** — fly above everything along a sky coin trail; the board soaks up one bump
 - **Stylized 3D graphics** powered by Babylon.js 9 — gradient sky dome with sun and cartoon
   clouds, procedural textures (asphalt, grass, lit building facades), a painted-backdrop
   layer of hills / mountains / skyline / ocean / planets per zone, flat-shaded props with
@@ -25,7 +34,10 @@ A high-quality 3D endless runner PWA built with Babylon.js — inspired by Subwa
 - **Ambient life** — swaying foliage, flocks of birds, meadow butterflies, drifting petals and
   leaves, a turning windmill, bobbing hot-air balloons
 - **Real sound effects** from Kenney's CC0 audio packs (impacts, coin tings, power-up sweeps,
-  pizzicato jingles), with the old synthesised beeps as fallback; music is still procedural
+  pizzicato jingles), with the old synthesised beeps as fallback
+- **Generative music** — a chord-based composer per zone (key, mode, four-chord loop, style):
+  bass, chords, arpeggio, drums and a melody improvised over the chord tones, so every run is different
+- **UI** in the bundled Fredoka font (SIL OFL) with vector icons and bevelled buttons
 - **Big on-screen buttons** for touch devices (toggle in settings)
 - **Pause menu** — tap the ⏸ button or press `Esc`
 - **Procedural audio** — zone-specific music and sound effects via Web Audio API
@@ -59,6 +71,8 @@ Query parameters, useful for screenshots and balance checks:
 | `?auto=1` | Start the run immediately |
 | `&dist=1010` | Start in the zone for that distance (0 / 500 / 1000 / 1500 / 2000) |
 | `&star=1` | Start with Star Power on |
+| `&pet=puppy` / `&jet=1` / `&board=1` | Preview a pet, start flying, start on a hoverboard |
+| `&tier=high` | Force a quality tier (`low` / `mid` / `high`) for this load |
 | `?sim=60` | Run 60 s of random-input autopilot before the first frame and log `[sim] …` to the console |
 
 ## Controls
@@ -79,10 +93,20 @@ The game works offline and can be installed directly to your home screen:
 - **iOS (Safari):** Share → *Add to Home Screen*
 - **Desktop Chrome:** click the ⊕ icon in the address bar
 
+## Look
+
+`src/game/core/StylePlugin.ts` is registered as a Babylon material plugin,
+so every material (kits, primitives, the character) gets the toon ramp,
+the rim light and the road-curve vertex offset. `Outline.ts` is a depth
+edge-detect post-process on the high tier. `Terrain.ts` is the visual-only
+hill height field; `Curve.ts` the bend amount. Contact shadows are baked
+into the verge's vertex colours in `TrackChunk.ts` from the footprints of
+the props placed on it.
+
 ## Models
 
-Vehicles, trees, plants, rocks and buildings are CC0 models from
-[Kenney](https://kenney.nl)'s Car Kit, Nature Kit and City Kit, merged into
+Vehicles, trees, plants, rocks, buildings and trains are CC0 models from
+[Kenney](https://kenney.nl)'s Car Kit, Nature Kit, City Kit and Train Kit, merged into
 one GLB per kit under `public/models/kits/` by `scripts/build-kits.mjs`
 (`npm run assets:kits` downloads the packs and rebuilds them). Each kit is
 loaded once at startup; every placement clones its meshes into the chunk

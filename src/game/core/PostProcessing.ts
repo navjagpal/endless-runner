@@ -7,6 +7,7 @@ import {
   ImageProcessingConfiguration,
 } from '@babylonjs/core'
 import type { QualityProfile } from './DeviceTier'
+import { setupOutline } from './Outline'
 
 /**
  * Stylized post-processing.
@@ -84,6 +85,8 @@ export function setupPostProcessing(
   curves.highlightsDensity    = 15
   curves.shadowsDensity       = -12
   ip.colorCurves = curves
+
+  if (quality.outline) setupOutline(scene, camera)
 
   return pipeline
 }
