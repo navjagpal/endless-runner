@@ -12,6 +12,7 @@ import {
 } from '@babylonjs/core'
 import { getQualityProfile, type QualityProfile } from './DeviceTier'
 import { terrainY } from '../track/Terrain'
+import { registerStylePlugin } from './StylePlugin'
 
 const LAMP_SPACING = 15     // must match TrackChunk lamp spacing
 const LAMP_SIDE_X  = [5.5, -5.5, 5.5, -5.5, 5.5, -5.5]
@@ -49,6 +50,8 @@ export class GameEngine {
 
   constructor(canvas: HTMLCanvasElement) {
     this.quality = getQualityProfile()
+    // Toon ramp + road curve on every material from here on.
+    registerStylePlugin()
 
     this.engine = new Engine(canvas, this.quality.antialias, {
       preserveDrawingBuffer: false,

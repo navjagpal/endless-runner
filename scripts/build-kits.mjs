@@ -50,6 +50,11 @@ const PACKS = {
     url:  'https://kenney.nl/media/pages/assets/city-kit-commercial/a742d900eb-1753115042/kenney_city-kit-commercial_2.1.zip',
     dir:  'Models/GLB format',
   },
+  train: {
+    page: 'https://kenney.nl/assets/train-kit',
+    url:  'https://kenney.nl/media/pages/assets/train-kit/cf8521d625-1727040883/kenney_train-kit.zip',
+    dir:  'Models/GLB format',
+  },
   blocky: {
     page: 'https://kenney.nl/assets/blocky-characters',
     url:  'https://kenney.nl/media/pages/assets/blocky-characters/8369c0cf30-1749547469/kenney_blocky-characters_20.zip',
@@ -148,6 +153,12 @@ const KITS = {
     'mushroom_red', 'mushroom_redGroup', 'mushroom_tan', 'mushroom_tanTall',
     'rock_largeA', 'rock_largeB', 'rock_smallA', 'rock_smallB', 'rock_tallA',
     'stump_round', 'stump_oldTall', 'log', 'log_stack', 'fence_simple', 'fence_planks', 'grass_large',
+  ] },
+  trains: { pack: 'train', models: [
+    'train-electric-bullet-a', 'train-electric-bullet-b', 'train-electric-city-a', 'train-diesel-a',
+    'train-carriage-box', 'train-carriage-container-red', 'train-carriage-container-blue',
+    'train-carriage-container-green', 'train-carriage-tank', 'train-carriage-lumber', 'train-carriage-coal',
+    'train-tram-classic', 'track',
   ] },
   city: { pack: 'city', models: [
     'building-a', 'building-b', 'building-c', 'building-d', 'building-e', 'building-f', 'building-g', 'building-h',
@@ -276,6 +287,7 @@ all **CC0 1.0** (public domain — no attribution required, credited anyway):
 - Car Kit — ${PACKS.car.page}
 - Nature Kit — ${PACKS.nature.page}
 - City Kit (Commercial) — ${PACKS.city.page}
+- Train Kit — ${PACKS.train.page}
 - Mini Characters (the runners, \`public/models/characters/\`) — ${PACKS.mini.page}
 
 Do not edit the .glb files by hand; change the model lists in the script

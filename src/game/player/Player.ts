@@ -63,6 +63,9 @@ const LANE_SWITCH_TIME   = 0.16
 const STAND_HEIGHT       = 1.50
 const SLIDE_HEIGHT       = 0.70
 
+/** Jetpack cruise height: above the tallest obstacle (bus roof 2.24, gantry 3.4). */
+export const FLY_HEIGHT  = 4.6
+
 export class Player {
   public mesh: Mesh                // invisible root — position + collision
 
@@ -94,6 +97,8 @@ export class Player {
   private invincible      = false
   private invincibleTimer = 0
   private starPower       = false
+  private flyTimer        = 0
+  private boardTimer      = 0
   private audio: AudioManager | null = null
 
   private blobShadow: Mesh
@@ -103,6 +108,9 @@ export class Player {
   private starPs: ParticleSystem
   private rainbowTrail: Mesh
   private magnetRing: Mesh
+  private jetpack: Mesh
+  private jetFlame: ParticleSystem
+  private board: Mesh
   private fxTime = 0
 
   constructor(scene: Scene, engine: GameEngine, characterId: string) {
@@ -140,7 +148,38 @@ export class Player {
     this.starPs       = this._makeStarParticles(scene)
     this.rainbowTrail = this._makeRainbowTrail(scene)
     this.magnetRing   = this._makeMagnetRing(scene)
+    this.jetpack      = this._makeJetpack(scene)
+    this.jetFlame     = this._makeJetFlame(scene)
+    this.board        = this._makeBoard(scene)
   }
+
+  // ─── Power-ups ─────────────────────────────────────────────────────
+
+  /** Fly above everything for a while; the landing is a normal fall. */
+  startJetpack(seconds: number): void {
+    this.flyTimer = seconds
+    this.state    = 'jumping'
+    this.jetpack.setEnabled(true)
+    this.jetFlame.start()
+  }
+
+  /** A board that soaks up one bump, then breaks. */
+  startBoard(seconds: number): void {
+    this.boardTimer = seconds
+    this.board.setEnabled(true)
+    this.charAnchor.position.y = -0.75 + 0.14
+  }
+
+  private _endBoard(): void {
+    this.boardTimer = 0
+    this.board.setEnabled(false)
+    this.charAnchor.position.y = -0.75
+  }
+
+  get isFlying(): boolean { return this.flyTimer > 0 }
+  get hasBoard(): boolean { return this.boardTimer > 0 }
+  get jetpackRemaining(): number { return this.flyTimer }
+  get boardRemaining(): number { return this.boardTimer }
 
   /**
    * Swaps the visual to another roster character. The old one stays on
@@ -209,6 +248,7 @@ export class Player {
   }
 
   private _tryJump(): boolean {
+    if (this.flyTimer > 0) return false
     if (this.state === 'jumping' || this.state === 'bumping') return false
     // Jumping is legal from any surface, not just the road — standing on a
     // vehicle rooftop still counts as grounded. What's disallowed is
@@ -228,7 +268,7 @@ export class Player {
   }
 
   slide(): void {
-    if (this.state === 'bumping') return
+    if (this.state === 'bumping' || this.flyTimer > 0) return
     if (this.state === 'jumping') {
       // Slam down out of a jump rather than ignoring the input.
       this.velY = Math.min(this.velY, -8)
@@ -244,6 +284,16 @@ export class Player {
   /** Returns true when the hit counted (false while invincible). */
   handleCollision(): boolean {
     if (this.isInvincible) return false
+    if (this.boardTimer > 0) {
+      // The board takes the hit and breaks; a moment of grace so the
+      // same obstacle can't land a second one.
+      this._endBoard()
+      this.invincible      = true
+      this.invincibleTimer = 1.0
+      this.bumpPs.start()
+      this.audio?.playBoardBreak()
+      return false
+    }
     this.state           = 'bumping'
     this.bumpTimer       = BUMP_DURATION
     this.invincible      = true
@@ -319,6 +369,14 @@ export class Player {
   }
 
   private _tickTimers(dt: number): void {
+    if (this.flyTimer > 0) {
+      this.flyTimer -= dt
+      if (this.flyTimer <= 0) { this.flyTimer = 0; this.jetpack.setEnabled(false); this.jetFlame.stop() }
+    }
+    if (this.boardTimer > 0) {
+      this.boardTimer -= dt
+      if (this.boardTimer <= 0) this._endBoard()
+    }
     if (this.slideTimer > 0) {
       this.slideTimer -= dt
       if (this.slideTimer <= 0 && this.state === 'sliding') this.state = 'running'
@@ -350,6 +408,15 @@ export class Player {
    * road. Airborne means gravity; grounded means stick to the surface.
    */
   private _updateVertical(dt: number): void {
+    if (this.flyTimer > 0) {
+      // Rise to cruise height and hold it; gravity resumes when the
+      // timer runs out, which reads as a glide down.
+      this.posY += (FLY_HEIGHT - this.posY) * Math.min(1, dt * 3.5)
+      this.velY  = 0
+      this.state = 'jumping'
+      this.wasAirborne = true
+      return
+    }
     const wasAir = this.airborne
     if (wasAir) {
       const g = (2 * JUMP_HEIGHT) / (JUMP_RISE_TIME * JUMP_RISE_TIME)
@@ -402,7 +469,7 @@ export class Player {
   }
 
   get position(): Vector3 { return this.mesh.position }
-  get isInvincible(): boolean { return this.invincible || this.starPower }
+  get isInvincible(): boolean { return this.invincible || this.starPower || this.flyTimer > 0 }
   get isSliding(): boolean { return this.state === 'sliding' }
   get lateralVelocity(): number { return this.lateralVel }
   get isAirborne(): boolean { return this.airborne }
@@ -513,6 +580,66 @@ export class Player {
     trail.isPickable = false
     trail.setEnabled(false)
     return trail
+  }
+
+  /** Two tanks on the back with red caps. Hidden until a jetpack pickup. */
+  private _makeJetpack(scene: Scene): Mesh {
+    const root = new Mesh('jetpack', scene)
+    root.parent = this.charAnchor
+    root.position.set(0, 0.95, -0.34)
+    const tank = new StandardMaterial('jetTank', scene)
+    tank.diffuseColor = new Color3(0.75, 0.78, 0.82); tank.specularColor = new Color3(0.3, 0.3, 0.3)
+    const cap = new StandardMaterial('jetCap', scene)
+    cap.diffuseColor = new Color3(0.95, 0.25, 0.20); cap.specularColor = Color3.Black()
+    for (const sx of [-0.16, 0.16]) {
+      const t = MeshBuilder.CreateCylinder('tank', { diameter: 0.22, height: 0.55, tessellation: 10 }, scene)
+      t.position.set(sx, 0, 0); t.material = tank; t.parent = root
+      const c = MeshBuilder.CreateCylinder('cap', { diameterTop: 0.08, diameterBottom: 0.22, height: 0.14, tessellation: 10 }, scene)
+      c.position.set(sx, 0.34, 0); c.material = cap; c.parent = root
+      const n = MeshBuilder.CreateCylinder('nozzle', { diameterTop: 0.20, diameterBottom: 0.12, height: 0.12, tessellation: 10 }, scene)
+      n.position.set(sx, -0.33, 0); n.material = cap; n.parent = root
+    }
+    const strap = MeshBuilder.CreateBox('strap', { width: 0.5, height: 0.08, depth: 0.1 }, scene)
+    strap.position.set(0, 0.1, 0.12); strap.material = cap; strap.parent = root
+    root.setEnabled(false)
+    return root
+  }
+
+  private _makeJetFlame(scene: Scene): ParticleSystem {
+    const scale = getQualityProfile().particleScale
+    const ps = new ParticleSystem('jetFlame', Math.ceil(120 * scale), scene)
+    ps.particleTexture = getSoftDiscTexture(scene)
+    ps.emitter         = this.jetpack
+    ps.minEmitBox      = new Vector3(-0.2, -0.4, -0.05)
+    ps.maxEmitBox      = new Vector3( 0.2, -0.35, 0.05)
+    ps.minSize = 0.18; ps.maxSize = 0.4
+    ps.minLifeTime = 0.15; ps.maxLifeTime = 0.3
+    ps.emitRate    = 90 * scale
+    ps.color1      = new Color4(1, 0.85, 0.3, 1)
+    ps.color2      = new Color4(1, 0.4, 0.1, 1)
+    ps.colorDead   = new Color4(0.6, 0.6, 0.6, 0)
+    ps.direction1  = new Vector3(-0.3, -3, -1.5)
+    ps.direction2  = new Vector3( 0.3, -4, -2.5)
+    ps.minEmitPower = 1; ps.maxEmitPower = 2
+    ps.blendMode = ParticleSystem.BLENDMODE_ADD
+    return ps
+  }
+
+  /** A hoverboard under the feet: pink deck, cyan glow stripe. */
+  private _makeBoard(scene: Scene): Mesh {
+    const deck = MeshBuilder.CreateBox('board', { width: 0.9, height: 0.08, depth: 1.7 }, scene)
+    deck.parent = this.charAnchor
+    deck.position.set(0, -0.08, 0.05)
+    const mat = new StandardMaterial('boardMat', scene)
+    mat.diffuseColor = new Color3(0.98, 0.35, 0.65); mat.specularColor = new Color3(0.2, 0.2, 0.2)
+    deck.material = mat
+    const stripe = MeshBuilder.CreateBox('boardStripe', { width: 0.94, height: 0.03, depth: 1.0 }, scene)
+    const glow = new StandardMaterial('boardGlow', scene)
+    glow.disableLighting = true; glow.emissiveColor = new Color3(0.4, 0.95, 1.0)
+    stripe.material = glow; stripe.parent = deck; stripe.position.y = -0.045
+    deck.isPickable = false
+    deck.setEnabled(false)
+    return deck
   }
 
   private _makeMagnetRing(scene: Scene): Mesh {

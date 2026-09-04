@@ -16,7 +16,10 @@ import { HUD }                 from './ui/HUD'
 import { Kits }                from './assets/Kits'
 import { Ambient }             from './fx/Ambient'
 import { terrainY }            from './track/Terrain'
-import { CHARACTERS, loadRoster, saveRoster, type Roster } from './player/Characters'
+import { curveAt }             from './track/Curve'
+import { CurveState }          from './core/StylePlugin'
+import { CHARACTERS, PETS, loadRoster, saveRoster, type Roster } from './player/Characters'
+import { Pet, type PetKind } from './player/Pet'
 import {
   type GameSettings, SPEED_MIN, SPEED_MAX, KID_SPEED_MAX, loadBest, saveBest, type BestRecord,
 } from './ui/Settings'
@@ -70,6 +73,7 @@ export class Game {
   private obstacles!:   ObstacleManager
   private zones:        ZoneManager | null = null
   private ambient!:     Ambient
+  private pet:          Pet
   private ready         = false
   private roster:       Roster
   private backdrop:     Backdrop
@@ -122,6 +126,8 @@ export class Game {
     this.roster    = loadRoster()
 
     this.player    = new Player(scene, this.engine, this.roster.selected)
+    this.pet       = new Pet(scene)
+    this.pet.setKind(this.roster.pet as PetKind)
     this.camera    = new FollowCamera(scene)
     this.audio     = new AudioManager()
     this.hud       = new HUD()
@@ -147,6 +153,9 @@ export class Game {
     this.hud.setRoster(CHARACTERS, this.roster)
     this.hud.onCharacterChange = (id) => { this.audio.playClick(); void this.player.setCharacter(id) }
     this.hud.onCharacterUnlock = (id) => this._unlockCharacter(id)
+    this.hud.setPets(PETS, this.roster)
+    this.hud.onPetChange = (id) => { this.audio.playClick(); this.pet.setKind(id as PetKind) }
+    this.hud.onPetUnlock = (id) => this._unlockPet(id)
     this.hud.onHome = () => { this._saveBest(); location.reload() }
     void this.audio.preload()
 
@@ -183,7 +192,7 @@ export class Game {
     devDist: number,
     q: URLSearchParams,
   ): Promise<void> {
-    await Kits.load(scene, ['vehicles', 'nature', 'city'])
+    await Kits.load(scene, ['vehicles', 'nature', 'city', 'trains'])
 
     this.track     = new TrackManager(scene, devDist)
     this.obstacles = new ObstacleManager(scene)
@@ -203,7 +212,7 @@ export class Game {
     this.zones.setBrightMode(this.settings.brightZones)
 
     this.zones.onZoneEntered = (zone) => {
-      this.ambient.setZone(zone.id)
+      this.ambient.setZone(zone.id, this.zones!.winter)
       this.audio.setZone(zone.id)
       this.audio.playCelebration()
       this.celebrations?.celebrateZone(zone)
@@ -223,8 +232,11 @@ export class Game {
 
     if (q.has('auto') || q.has('sim')) {
       this._startRun()
-      if (devDist > 0) { this.totalDistance = devDist; this.zones!.snap(devDist); this.ambient.setZone(this.zones!.currentZone.id) }
+      if (devDist > 0) { this.totalDistance = devDist; this.zones!.snap(devDist); this.ambient.setZone(this.zones!.currentZone.id, this.zones!.winter) }
       if (q.has('star')) this._startStarPower()
+      if (q.get('pet')) this.pet.setKind(q.get('pet') as PetKind)
+      if (q.has('jet')) this._onJetpack()
+      if (q.has('board')) this._onBoard()
       const simSecs = Number(q.get('sim')) || 0
       if (simSecs > 0) this._simulate(simSecs)
     }
@@ -279,11 +291,47 @@ export class Game {
     void this.player.setCharacter(id)
   }
 
+  private _unlockPet(id: string): void {
+    const def = PETS.find(p => p.id === id)
+    if (!def) return
+    if (!this.roster.unlockedPets.includes(id)) {
+      if (this.roster.bank < def.cost) {
+        this.audio.playLocked()
+        this.hud.shakePet()
+        return
+      }
+      this.roster.bank -= def.cost
+      this.roster.unlockedPets.push(id)
+      this.celebrations?.burst(1.5)
+    }
+    this.roster.pet = id
+    saveRoster(this.roster)
+    this.audio.playSelect()
+    this.hud.setRoster(CHARACTERS, this.roster)
+    this.hud.setPets(PETS, this.roster)
+    this.pet.setKind(id as PetKind)
+  }
+
+  private _onJetpack(): void {
+    const secs = 6.5
+    this.player.startJetpack(secs)
+    this.obstacles.spawnSkyCoins(this.player.position.z, secs * this.runSpeed * 1.1)
+    this.audio.playStar()
+    this.celebrations?.pop('🚀 Jetpack!', '#fdba74', true)
+  }
+
+  private _onBoard(): void {
+    this.player.startBoard(20)
+    this.audio.playSelect()
+    this.celebrations?.pop('🛹 Hoverboard!', '#f9a8d4')
+  }
+
   private _startRun(): void {
     if (!this.ready) return
     this.camera.setShowcase(false)
-    // Browsing a locked character doesn't let you run as it.
+    // Browsing a locked character or pet doesn't let you run with it.
     void this.player.setCharacter(this.roster.selected)
+    this.pet.setKind(this.roster.pet as PetKind)
     this.audio.resume()
     this.audio.startMusic()
     this.running       = true
@@ -441,6 +489,7 @@ export class Game {
     if (this.ready && !this.running) {
       // Start screen: the runner jogs on the spot while the camera orbits.
       this.player.update(dt, 0, 0)
+      this.pet.update(dt, this.player.position.x, this.player.position.z, this.player.bodyBottom, 0)
       this.camera.update(this.player.position, dt, 0, 0, terrainY(this.player.position.z))
       this.ambient.update(this.player.position, dt)
       this.clouds.update(this.player.position.z, dt)
@@ -502,13 +551,22 @@ export class Game {
         onCoin:    (p) => this._onCoin(p),
         onDodge:   () => this._onDodge(),
         onMagnet:  () => this._onMagnet(),
+        onJetpack: () => this._onJetpack(),
+        onBoard:   () => this._onBoard(),
         onRooftop: () => this._onRooftop(),
       },
+      this.zones?.currentZone.id ?? 'meadow',
+      this.pet.active ? this.pet.position : null,
     )
+    this.pet.update(dt, this.player.position.x, this.player.position.z, this.player.bodyBottom, speed)
     this.player.setMagnet(this.obstacles.magnetActive)
 
     this.camera.update(this.player.position, dt, speedFrac, this.player.lateralVelocity, terrainY(this.player.position.z))
-    this.ambient.update(this.player.position, dt)
+    // The road bends ahead of wherever the player is; ease the amount so
+    // a lane's worth of sideways sweep never appears between frames.
+    CurveState.playerZ = this.player.position.z
+    CurveState.k += (curveAt(this.player.position.z) - CurveState.k) * Math.min(1, dt * 2)
+    this.ambient.update(this.player.position, dt, this.totalDistance)
     this.engine.updateLampLights(this.player.position.z)
     this.clouds.update(this.player.position.z, dt)
     this.backdrop.update(this.player.position.z, dt)
@@ -527,6 +585,8 @@ export class Game {
       starMeter:       this.starMeter / STAR_METER_MAX,
       starActive:      this.starTimer > 0,
       magnetRemaining: this.obstacles.magnetRemaining,
+      jetpackRemaining: this.player.jetpackRemaining,
+      boardRemaining:  this.player.boardRemaining,
       bestDistance:    this.prevBest,
     })
   }

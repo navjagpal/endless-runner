@@ -1,44 +1,38 @@
 // ─── Zone music configs ───────────────────────────────────────────────────────
+//
+// Each zone is a key, a mode, a four-chord loop and a style. The composer
+// below turns that into bass, chords, an arpeggio, drums and a melody
+// improvised over the chord tones — so the music is different every run
+// but always in key, and each zone has its own feel.
+
+type Style = 'pluck' | 'pad' | 'funk' | 'chug' | 'offbeat' | 'arp'
 
 interface ZoneMusic {
-  bpm:    number
-  melody: number[]
-  bass:   number[]
-  scale:  'major' | 'minor' | 'pentatonic' | 'chromatic'
+  bpm:   number
+  /** Root of the key, Hz (octave 3). */
+  root:  number
+  mode:  'major' | 'minor'
+  /** Chord roots as scale degrees (0-based) for a four-bar loop. */
+  chords: number[]
+  style: Style
+  echo?: boolean
 }
 
 const ZONE_MUSIC: Record<string, ZoneMusic> = {
-  meadow: {
-    bpm: 132,
-    melody: [659, 784, 880, 784, 659, 587, 523, 587, 659, 784, 880, 1047, 988, 880, 784, 659],
-    bass:   [131, 131, 165, 131, 110, 110, 131, 110, 131, 131, 165, 131,  147, 131, 110, 131],
-    scale: 'major',
-  },
-  forest: {
-    bpm: 108,
-    melody: [440, 392, 349, 330, 294, 330, 349, 392, 440, 494, 523, 494, 440, 392, 349, 330],
-    bass:   [110, 110,  88,  88,  73,  73,  88,  88, 110, 110, 131, 110,  98,  98,  88,  88],
-    scale: 'minor',
-  },
-  city: {
-    bpm: 148,
-    melody: [880, 988, 880, 784, 880, 988, 1047, 988, 880, 784, 698, 784, 880, 784, 698, 659],
-    bass:   [220, 220, 247, 220, 196, 196, 220,  196, 220, 220, 175, 196, 220, 196, 175, 165],
-    scale: 'chromatic',
-  },
-  beach: {
-    bpm: 128,
-    melody: [523, 659, 784, 880, 784, 659, 523, 440, 523, 659, 784, 1047, 880, 784, 659, 523],
-    bass:   [131, 131, 165, 165, 147, 131, 110, 110, 131, 131, 165, 165,  147, 131, 110, 110],
-    scale: 'pentatonic',
-  },
-  space: {
-    bpm: 120,
-    melody: [440, 494, 440, 392, 370, 392, 440, 494, 523, 587, 523, 494, 440, 415, 440, 494],
-    bass:   [110, 110, 123, 110,  92,  98, 110, 110, 131, 131, 123, 110, 110,  98, 110, 110],
-    scale: 'minor',
-  },
+  meadow:  { bpm: 132, root: 130.81, mode: 'major', chords: [0, 4, 5, 3], style: 'pluck' },      // C  I V vi IV
+  forest:  { bpm: 108, root: 110.00, mode: 'minor', chords: [0, 5, 2, 6], style: 'pad' },        // Am i VI III VII
+  city:    { bpm: 148, root: 164.81, mode: 'major', chords: [0, 3, 4, 3], style: 'funk' },       // E  I IV V IV
+  railway: { bpm: 140, root: 196.00, mode: 'major', chords: [0, 0, 3, 4], style: 'chug' },       // G  I I IV V
+  beach:   { bpm: 126, root: 146.83, mode: 'major', chords: [0, 3, 0, 4], style: 'offbeat' },    // D  I IV I V
+  space:   { bpm: 120, root: 138.59, mode: 'minor', chords: [0, 5, 3, 4], style: 'arp', echo: true }, // C#m i VI iv v
 }
+
+const SCALES = {
+  major: [0, 2, 4, 5, 7, 9, 11],
+  minor: [0, 2, 3, 5, 7, 8, 10],
+}
+
+const semi = (root: number, n: number) => root * Math.pow(2, n / 12)
 
 // ─── AudioManager ─────────────────────────────────────────────────────────────
 
@@ -102,6 +96,7 @@ export class AudioManager {
   playSelect(): void { this._play('select', 0.7) }
   playLocked(): void { this._play('locked', 0.6) }
   playSpill():  void { this._play('spill', 0.6) }
+  playBoardBreak(): void { if (!this._play('spill', 0.8, 0.7)) this.playBump() }
   playLand():   void { this._play('land', 0.35, 0.9 + Math.random() * 0.2) }
 
   // ─── Zone crossfade ──────────────────────────────────────────────────────
@@ -271,12 +266,27 @@ export class AudioManager {
     this._musicGain.gain.value = 0.42
     this._musicGain.connect(this._masterGain)
 
+    // A feedback delay the space zone fades in; silent elsewhere.
+    this._delay = ctx.createDelay(1.0)
+    this._delay.delayTime.value = 0.28
+    this._delayGain = ctx.createGain()
+    this._delayGain.gain.value = 0
+    const fb = ctx.createGain(); fb.gain.value = 0.42
+    this._musicGain.connect(this._delay)
+    this._delay.connect(fb); fb.connect(this._delay)
+    this._delay.connect(this._delayGain); this._delayGain.connect(this._masterGain)
+
     this._nextBar = ctx.currentTime + 0.05
     this._scheduleBar()
     this._loop()
   }
 
   // ─── Private ─────────────────────────────────────────────────────────────
+
+  private _delay!: DelayNode
+  private _delayGain!: GainNode
+  private _bar = 0
+  private _phrase: number[] = []
 
   private _ctx(): AudioContext {
     if (!this.ctx) this.ctx = new AudioContext()
@@ -293,7 +303,7 @@ export class AudioManager {
   private _loop(): void {
     setTimeout(() => {
       const ctx = this._ctx()
-      if (this._nextBar - ctx.currentTime < this._beatDuration() * 10) {
+      if (this._nextBar - ctx.currentTime < this._beatDuration() * 6) {
         this._scheduleBar()
       }
       this._loop()
@@ -305,96 +315,168 @@ export class AudioManager {
     return 60 / zm.bpm
   }
 
+  /**
+   * One bar of four beats. The chord for the bar comes from the zone's
+   * loop; the melody is a two-bar phrase generated from chord tones and
+   * scale steps, re-rolled every eight bars so it develops without ever
+   * leaving the key.
+   */
   private _scheduleBar(): void {
-    // Snap zone change at bar boundary
+    const zoneChanged = this._currentZone !== this._targetZone
     this._currentZone = this._targetZone
+    if (zoneChanged) this._phrase = []
 
-    const zm   = ZONE_MUSIC[this._currentZone] ?? ZONE_MUSIC['meadow']
-    const beat = 60 / zm.bpm
-    const t    = this._nextBar
-    this._nextBar += beat * 16
+    const zm    = ZONE_MUSIC[this._currentZone] ?? ZONE_MUSIC['meadow']
+    const beat  = 60 / zm.bpm
+    const t0    = this._nextBar
+    const bar   = this._bar++
+    this._nextBar += beat * 4
+    const scale = SCALES[zm.mode]
+    const deg   = zm.chords[bar % zm.chords.length]
+    // Chord tones in semitones above the key root: 1, 3, 5 of the degree.
+    const tone  = (d: number, oct = 0) => semi(zm.root, scale[((d % 7) + 7) % 7] + 12 * (Math.floor(d / 7) + oct))
+    const chord = [tone(deg), tone(deg + 2), tone(deg + 4)]
 
+    if (this._delayGain) this._delayGain.gain.setTargetAtTime(zm.echo ? 0.35 : 0, t0, 0.5)
+
+    // Drums
+    const s = zm.style
     for (let i = 0; i < 16; i++) {
-      const bt = t + i * beat
-
-      // Kick  — beats 0, 8
-      if (i === 0 || i === 8)  this._kick(bt)
-
-      // Snare — beats 4, 12
-      if (i === 4 || i === 12) this._snare(bt)
-
-      // Hi-hat every 2 steps, open on 6 & 14
-      if (i % 2 === 0) {
-        const open = i === 6 || i === 14
-        this._hihat(bt, open)
+      const t = t0 + i * beat / 4
+      const onBeat = i % 4 === 0
+      if (s === 'chug') {
+        if (i % 4 === 0) this._kick(t, 0.5)
+        if (i % 8 === 4) this._snare(t, 0.14)
+        if (i % 2 === 0) this._hihat(t, false, 0.03)
+        if (i % 4 === 2) this._woodblock(t)
+      } else if (s === 'funk') {
+        if (i === 0 || i === 6 || i === 10) this._kick(t, 0.55)
+        if (i === 4 || i === 12) this._snare(t, 0.16)
+        this._hihat(t, i % 4 === 2, i % 2 ? 0.02 : 0.035)
+      } else if (s === 'pad') {
+        if (i === 0 || i === 8) this._kick(t, 0.35)
+        if (i === 4 || i === 12) this._snare(t, 0.08)
+        if (i % 4 === 2) this._hihat(t, true, 0.02)
+      } else {
+        if (i === 0 || i === 8) this._kick(t, 0.5)
+        if (i === 4 || i === 12) this._snare(t, 0.14)
+        if (i % 2 === 0) this._hihat(t, i === 6 || i === 14, onBeat ? 0.04 : 0.03)
       }
+      // A little fill into every fourth bar
+      if (bar % 4 === 3 && i >= 12) this._snare(t, 0.06 + (i - 12) * 0.02)
+    }
 
-      // Melody
-      this._tone(bt, zm.melody[i], beat * 0.82, 0.045, 'sine')
+    // Bass
+    const bassRoot = chord[0] / 2
+    const fifth    = chord[2] / 2
+    if (s === 'chug') {
+      for (let i = 0; i < 8; i++) this._voice(t0 + i * beat / 2, i % 2 ? fifth : bassRoot, beat * 0.4, 0.07, 'sawtooth', 700)
+    } else if (s === 'funk') {
+      for (const [i, f] of [[0, bassRoot], [1.5, bassRoot], [2, fifth], [3, bassRoot], [3.5, bassRoot * 1.5]] as [number, number][]) {
+        this._voice(t0 + i * beat, f, beat * 0.35, 0.075, 'square', 900)
+      }
+    } else if (s === 'offbeat') {
+      for (let i = 0; i < 4; i++) this._voice(t0 + i * beat, i % 2 ? fifth : bassRoot, beat * 0.9, 0.07, 'triangle', 600)
+    } else {
+      for (let i = 0; i < 4; i++) this._voice(t0 + i * beat, i === 2 ? fifth : bassRoot, beat * 0.8, 0.07, 'sawtooth', 500)
+    }
 
-      // Bass every 2 steps
-      if (i % 2 === 0) this._tone(bt, zm.bass[i], beat * 1.75, 0.06, 'square')
+    // Chords
+    if (s === 'pad') {
+      for (const f of chord) this._voice(t0, f, beat * 3.9, 0.035, 'triangle', 1400, 0.4)
+    } else if (s === 'offbeat') {
+      for (let i = 0; i < 4; i++) for (const f of chord) this._voice(t0 + (i + 0.5) * beat, f, beat * 0.28, 0.03, 'triangle', 2200)
+    } else if (s === 'funk') {
+      for (const i of [0.5, 1.75, 2.5]) for (const f of chord) this._voice(t0 + i * beat, f * 2, beat * 0.2, 0.025, 'square', 2600)
+    } else {
+      for (const i of [0, 2]) for (const f of chord) this._voice(t0 + i * beat, f, beat * 0.9, 0.028, 'triangle', 1800)
+    }
 
-      // Arp every 4 steps (zone flavour)
-      if (i % 4 === 0) {
-        const arpFreq = zm.melody[i] * 2
-        this._tone(bt + beat * 0.5, arpFreq, beat * 0.30, 0.025, 'triangle')
-        this._tone(bt + beat * 0.75, arpFreq * 1.25, beat * 0.25, 0.018, 'triangle')
+    // Arpeggio (16ths on chord tones, two octaves)
+    if (s === 'arp' || s === 'pluck' || s === 'chug') {
+      const arp = [chord[0] * 2, chord[1] * 2, chord[2] * 2, chord[1] * 4, chord[2] * 2, chord[1] * 2]
+      const step = s === 'arp' ? beat / 4 : beat / 2
+      const n = s === 'arp' ? 16 : 8
+      for (let i = 0; i < n; i++) {
+        this._voice(t0 + i * step, arp[i % arp.length], step * 0.9, s === 'arp' ? 0.03 : 0.02, 'triangle', 3000)
       }
     }
+
+    // Melody: a two-bar phrase of eighth notes, re-rolled every eight bars.
+    if (bar % 8 === 0 || !this._phrase.length) this._phrase = this._makePhrase(zm)
+    const half = (bar % 2) * 8
+    for (let i = 0; i < 8; i++) {
+      const d = this._phrase[half + i]
+      if (d < 0) continue
+      // Pull the note toward the current chord so the phrase follows the harmony.
+      const chordDeg = [deg, deg + 2, deg + 4].map(x => ((x % 7) + 7) % 7)
+      const degree = i % 2 === 0 && !chordDeg.includes(((d % 7) + 7) % 7) ? deg + 2 : d
+      const f = tone(degree, 2)
+      const type: OscillatorType = s === 'funk' ? 'square' : s === 'pad' ? 'sine' : 'triangle'
+      this._voice(t0 + i * beat / 2, f, beat * (s === 'pad' ? 0.95 : 0.45), 0.05, type, 2600, s === 'pad' ? 0.15 : 0.005)
+    }
+  }
+
+  /** Sixteen eighth-note slots: scale degrees, or -1 for a rest. */
+  private _makePhrase(zm: ZoneMusic): number[] {
+    const out: number[] = []
+    let d = 0
+    for (let i = 0; i < 16; i++) {
+      const r = Math.random()
+      if (r < 0.18 && i % 4 !== 0) { out.push(-1); continue }         // rests off the beat
+      if (r < 0.5)      d += Math.random() < 0.5 ? 1 : -1              // step
+      else if (r < 0.7) d += Math.random() < 0.5 ? 2 : -2              // skip
+      else if (r < 0.8) d = 0                                          // home
+      if (d > 8) d = 4
+      if (d < -3) d = 0
+      out.push(d)
+    }
+    if (zm.style === 'pad') for (let i = 1; i < 16; i += 2) out[i] = -1  // slower phrases for the pad zone
+    return out
   }
 
   // ─── Audio primitives ────────────────────────────────────────────────────
 
-  private _kick(t: number): void {
+  private _kick(t: number, vol = 0.55): void {
     const ctx = this._ctx()
     const osc = ctx.createOscillator(); const g = ctx.createGain()
     osc.connect(g); g.connect(this._musicGain)
     osc.type = 'sine'
     osc.frequency.setValueAtTime(160, t)
     osc.frequency.exponentialRampToValueAtTime(38, t + 0.20)
-    g.gain.setValueAtTime(0.55, t)
+    g.gain.setValueAtTime(vol, t)
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.28)
     osc.start(t); osc.stop(t + 0.28)
   }
 
-  private _snare(t: number): void {
+  private _noise(t: number, dur: number, filterType: BiquadFilterType, freq: number, vol: number): void {
     const ctx = this._ctx()
-    const dur = 0.10
     const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate)
     const d   = buf.getChannelData(0)
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
     const src = ctx.createBufferSource(); src.buffer = buf
-    const flt = ctx.createBiquadFilter(); flt.type = 'bandpass'; flt.frequency.value = 2800
+    const flt = ctx.createBiquadFilter(); flt.type = filterType; flt.frequency.value = freq
     const g   = ctx.createGain()
     src.connect(flt); flt.connect(g); g.connect(this._musicGain)
-    g.gain.setValueAtTime(0.16, t)
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur)
-    src.start(t); src.stop(t + dur)
-  }
-
-  private _hihat(t: number, open: boolean): void {
-    const ctx = this._ctx()
-    const dur = open ? 0.14 : 0.055
-    const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate)
-    const d   = buf.getChannelData(0)
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
-    const src = ctx.createBufferSource(); src.buffer = buf
-    const flt = ctx.createBiquadFilter(); flt.type = 'highpass'; flt.frequency.value = 9000
-    const g   = ctx.createGain()
-    src.connect(flt); flt.connect(g); g.connect(this._musicGain)
-    g.gain.setValueAtTime(open ? 0.06 : 0.035, t)
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur)
-    src.start(t); src.stop(t + dur)
-  }
-
-  private _tone(t: number, freq: number, dur: number, vol: number, type: OscillatorType): void {
-    const ctx = this._ctx()
-    const osc = ctx.createOscillator(); const g = ctx.createGain()
-    osc.connect(g); g.connect(this._musicGain)
-    osc.type = type; osc.frequency.value = freq
     g.gain.setValueAtTime(vol, t)
     g.gain.exponentialRampToValueAtTime(0.001, t + dur)
-    osc.start(t); osc.stop(t + dur)
+    src.start(t); src.stop(t + dur)
+  }
+
+  private _snare(t: number, vol = 0.16): void { this._noise(t, 0.11, 'bandpass', 2600, vol) }
+  private _hihat(t: number, open: boolean, vol = 0.035): void { this._noise(t, open ? 0.14 : 0.05, 'highpass', 9000, vol) }
+  private _woodblock(t: number): void { this._voice(t, 1800, 0.05, 0.05, 'square', 4000) }
+
+  /** A filtered oscillator note with a short envelope. */
+  private _voice(t: number, freq: number, dur: number, vol: number, type: OscillatorType, cutoff = 2000, attack = 0.005): void {
+    const ctx = this._ctx()
+    const osc = ctx.createOscillator(); const g = ctx.createGain()
+    const flt = ctx.createBiquadFilter(); flt.type = 'lowpass'; flt.frequency.value = cutoff; flt.Q.value = 0.7
+    osc.connect(flt); flt.connect(g); g.connect(this._musicGain)
+    osc.type = type; osc.frequency.value = freq
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.linearRampToValueAtTime(vol, t + attack)
+    g.gain.exponentialRampToValueAtTime(0.001, t + Math.max(attack + 0.02, dur))
+    osc.start(t); osc.stop(t + Math.max(attack + 0.02, dur) + 0.02)
   }
 }

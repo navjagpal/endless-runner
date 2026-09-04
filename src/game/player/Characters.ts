@@ -36,10 +36,25 @@ export function characterUrl(id: string): string {
   return `${import.meta.env.BASE_URL}models/characters/${id}.glb`
 }
 
+export interface PetDef {
+  id:   string
+  name: string
+  cost: number
+}
+
+export const PETS: PetDef[] = [
+  { id: 'none',   name: 'No pet',   cost: 0 },
+  { id: 'puppy',  name: 'Buddy',    cost: 120 },
+  { id: 'kitten', name: 'Whiskers', cost: 220 },
+  { id: 'bunny',  name: 'Hops',     cost: 320 },
+]
+
 export interface Roster {
-  selected: string
-  bank:     number
-  unlocked: string[]
+  selected:     string
+  bank:         number
+  unlocked:     string[]
+  pet:          string
+  unlockedPets: string[]
 }
 
 const KEY = 'runner_roster_v1'
@@ -52,10 +67,13 @@ export function loadRoster(): Roster {
       const unlocked = Array.isArray(r.unlocked) ? r.unlocked.filter(id => CHARACTERS.some(c => c.id === id)) : []
       if (!unlocked.includes(DEFAULT_CHARACTER)) unlocked.unshift(DEFAULT_CHARACTER)
       const selected = typeof r.selected === 'string' && unlocked.includes(r.selected) ? r.selected : DEFAULT_CHARACTER
-      return { selected, bank: Math.max(0, Number(r.bank) || 0), unlocked }
+      const unlockedPets = Array.isArray(r.unlockedPets) ? r.unlockedPets.filter(id => PETS.some(p => p.id === id)) : []
+      if (!unlockedPets.includes('none')) unlockedPets.unshift('none')
+      const pet = typeof r.pet === 'string' && unlockedPets.includes(r.pet) ? r.pet : 'none'
+      return { selected, bank: Math.max(0, Number(r.bank) || 0), unlocked, pet, unlockedPets }
     }
   } catch { /* storage unavailable */ }
-  return { selected: DEFAULT_CHARACTER, bank: 0, unlocked: [DEFAULT_CHARACTER] }
+  return { selected: DEFAULT_CHARACTER, bank: 0, unlocked: [DEFAULT_CHARACTER], pet: 'none', unlockedPets: ['none'] }
 }
 
 export function saveRoster(r: Roster): void {
