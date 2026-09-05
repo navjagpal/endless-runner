@@ -75,8 +75,12 @@ export class Game {
 
     this.hud.setGarage(VEHICLES, this.garage)
     this.hud.setReady(false)
-    this.hud.onVehicleChange = (id) => { this.audio.playClick(); this._preview(id) }
-    this.hud.onVehicleUnlock = (id) => this._unlock(id)
+    this.hud.onVehicleChange = (id) => {
+      this.audio.playSelect()
+      this.garage.selected = id
+      saveGarage(this.garage)
+      this._preview(id)
+    }
     this.hud.onPlay = () => this._start()
     this.hud.onPause = () => this._pause()
     this.hud.onResume = () => this._resume()
@@ -158,21 +162,6 @@ export class Game {
     const def = this._def(id)
     this.vehicle.setVehicle(def)
     this.hud.setAction(def.action)
-  }
-
-  private _unlock(id: string): void {
-    const def = this._def(id)
-    if (!this.garage.unlocked.includes(id)) {
-      if (this.garage.bank < def.cost) { this.audio.playLocked(); this.hud.shakeUnlock(); return }
-      this.garage.bank -= def.cost
-      this.garage.unlocked.push(id)
-      this.celebrations?.burst(1.5)
-    }
-    this.garage.selected = id
-    saveGarage(this.garage)
-    this.audio.playSelect()
-    this.hud.setGarage(VEHICLES, this.garage)
-    this._preview(id)
   }
 
   private _start(): void {

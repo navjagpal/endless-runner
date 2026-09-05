@@ -39,12 +39,11 @@ export class HUD {
   private playBtn!: HTMLButtonElement
   private vehName!: HTMLDivElement
   private vehStatus!: HTMLDivElement
-  private unlockBtn!: HTMLButtonElement
   private bankEl!: HTMLDivElement
   private bestEl!: HTMLDivElement
 
   private vehicles: VehicleDef[] = []
-  private garage: GarageState = { selected: '', bank: 0, unlocked: [] }
+  private garage: GarageState = { selected: '', bank: 0 }
   private viewIndex = 0
 
   onPlay?: () => void
@@ -54,7 +53,6 @@ export class HUD {
   onJump?: () => void
   onAction?: () => void
   onVehicleChange?: (id: string) => void
-  onVehicleUnlock?: (id: string) => void
 
   constructor() {
     injectCSS()
@@ -167,11 +165,6 @@ export class HUD {
     }
   }
 
-  shakeUnlock(): void {
-    this.unlockBtn.style.animation = 'none'; void this.unlockBtn.offsetWidth
-    this.unlockBtn.style.animation = 'vShake 0.4s ease'
-  }
-
   // ─── Garage carousel ────────────────────────────────────────────────────
 
   private _cycle(dir: number): void {
@@ -184,24 +177,9 @@ export class HUD {
   private _renderVehicle(): void {
     const v = this.vehicles[this.viewIndex]
     if (!v) return
-    const owned = this.garage.unlocked.includes(v.id), chosen = this.garage.selected === v.id
     this.vehName.textContent = `${v.emoji} ${v.name}`
     this.bankEl.innerHTML = `${icon('coin', '1.2em')} ${this.garage.bank}`
-    if (chosen) {
-      this.vehStatus.textContent = '✓ Ready to drive!'
-      this.unlockBtn.style.display = 'none'
-    } else if (owned) {
-      this.vehStatus.textContent = 'In the garage'
-      this.unlockBtn.style.display = 'inline-block'
-      this.unlockBtn.textContent = `Drive the ${v.name}`
-      this.unlockBtn.style.background = 'linear-gradient(180deg,#4ade80,#22d3ee)'
-    } else {
-      const can = this.garage.bank >= v.cost
-      this.vehStatus.innerHTML = can ? `Unlock for ${icon('coin', '1em')} ${v.cost}` : `🔒 Needs ${icon('coin', '1em')} ${v.cost}`
-      this.unlockBtn.style.display = 'inline-block'
-      this.unlockBtn.innerHTML = can ? `🔓 Unlock ${icon('coin', '1em')} ${v.cost}` : `🔒 ${v.cost - this.garage.bank} more`
-      this.unlockBtn.style.background = can ? 'linear-gradient(180deg,#fbbf24,#f97316)' : 'linear-gradient(180deg,#94a3b8,#64748b)'
-    }
+    this.vehStatus.textContent = { siren: 'Big button: SIREN!', horn: 'Big button: HONK!', wheelie: 'Big button: WHEELIE!', bounce: 'Big button: BOUNCE!' }[v.action]
   }
 
   // ─── Screens ────────────────────────────────────────────────────────────
@@ -247,14 +225,7 @@ export class HUD {
     this.vehName.style.cssText = 'font-size:clamp(1.5rem,5.5vw,2.6rem);font-weight:700;color:#fff;text-shadow:0 3px 0 rgba(0,0,0,0.3),0 6px 18px rgba(0,0,0,0.5);'
     this.vehStatus = document.createElement('div')
     this.vehStatus.style.cssText = 'font-size:clamp(0.85rem,2.6vw,1.1rem);font-weight:700;color:rgba(255,255,255,0.9);text-shadow:0 2px 6px rgba(0,0,0,0.5);'
-    this.unlockBtn = document.createElement('button')
-    this.unlockBtn.className = 'vb'
-    this.unlockBtn.style.cssText = `
-      display:none;font-family:inherit;font-size:clamp(0.9rem,2.8vw,1.15rem);font-weight:700;padding:9px 22px;
-      border:3px solid rgba(255,255,255,0.7);border-radius:40px;cursor:pointer;color:#fff;box-shadow:0 6px 0 rgba(0,0,0,0.28);pointer-events:all;
-    `
-    this.unlockBtn.addEventListener('pointerup', (e) => { e.stopPropagation(); const v = this.vehicles[this.viewIndex]; if (v) this.onVehicleUnlock?.(v.id) })
-    centre.append(this.vehName, this.vehStatus, this.unlockBtn)
+    centre.append(this.vehName, this.vehStatus)
     row.append(arrow(icon('arrowL', '1em'), -1), centre, arrow(icon('arrowR', '1em'), 1))
 
     this.bankEl = document.createElement('div')
