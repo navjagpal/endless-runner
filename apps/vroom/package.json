@@ -1,0 +1,20 @@
+{
+  "name": "vroom",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5174",
+    "build": "tsc --noEmit -p . && vite build",
+    "typecheck": "tsc --noEmit -p .",
+    "preview": "vite preview --port 4174"
+  },
+  "dependencies": {
+    "@kids/engine": "*",
+    "@babylonjs/core": "^9.1.0",
+    "@babylonjs/loaders": "^9.1.0",
+    "@babylonjs/materials": "^9.1.0",
+    "vite-plugin-pwa": "^1.2.0",
+    "workbox-window": "^7.4.0"
+  }
+}
