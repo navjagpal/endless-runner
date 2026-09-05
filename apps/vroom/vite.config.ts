@@ -46,7 +46,12 @@ export default defineConfig({
   resolve: {
     dedupe: ['@babylonjs/core', '@babylonjs/materials', '@babylonjs/loaders'],
   },
+  // Each app gets its own dependency cache: two dev servers sharing
+  // node_modules/.vite re-optimise over each other, and the glTF loader
+  // (a lazily imported subpath, listed here so it's bundled up front)
+  // ends up registered against a second copy of Babylon.
+  cacheDir: '../../node_modules/.vite/vroom',
   optimizeDeps: {
-    include: ['@babylonjs/core', '@babylonjs/materials', '@babylonjs/loaders'],
+    include: ['@babylonjs/core', '@babylonjs/materials', '@babylonjs/loaders', '@babylonjs/loaders/glTF'],
   },
 })
