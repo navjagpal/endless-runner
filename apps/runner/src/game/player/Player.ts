@@ -13,13 +13,13 @@ import { LANE_POSITIONS } from '../track/TrackChunk'
 import { CharacterMesh } from './CharacterMesh'
 import { CharacterRig } from './CharacterRig'
 import type { Character, CharacterState } from './Character'
-import type { AudioManager } from '../audio/AudioManager'
-import type { GameEngine } from '../core/GameEngine'
+import type { AudioManager } from '@kids/engine'
+import type { GameEngine } from '@kids/engine'
 import {
   getBlobShadowTexture, getSoftDiscTexture, getSparkleTexture, getRainbowTexture,
-} from '../fx/Textures'
-import { getQualityProfile } from '../core/DeviceTier'
-import { terrainY } from '../track/Terrain'
+} from '@kids/engine'
+import { getQualityProfile } from '@kids/engine'
+import { terrainY } from '@kids/engine'
 import { characterUrl } from './Characters'
 
 /**

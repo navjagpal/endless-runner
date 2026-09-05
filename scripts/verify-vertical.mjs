@@ -28,8 +28,8 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const playerSrc = readFileSync(join(root, 'src/game/player/Player.ts'), 'utf8')
-const obstacleSrc = readFileSync(join(root, 'src/game/obstacles/ObstacleManager.ts'), 'utf8')
+const playerSrc = readFileSync(join(root, 'apps/runner/src/game/player/Player.ts'), 'utf8')
+const obstacleSrc = readFileSync(join(root, 'apps/runner/src/game/obstacles/ObstacleManager.ts'), 'utf8')
 
 function num(src, name, where) {
   const m = src.match(new RegExp(`const\\s+${name}\\s*=\\s*([0-9.]+)`))

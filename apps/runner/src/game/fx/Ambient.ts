@@ -11,8 +11,8 @@ import {
   ParticleSystem,
   Constants,
 } from '@babylonjs/core'
-import { getQualityProfile } from '../core/DeviceTier'
-import { getRainbowTexture } from './Textures'
+import { getQualityProfile } from '@kids/engine'
+import { getRainbowTexture } from '@kids/engine'
 import { ZONES } from '../zones/ZoneManager'
 
 /**

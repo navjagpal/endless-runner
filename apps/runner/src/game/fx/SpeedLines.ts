@@ -5,8 +5,8 @@ import {
   Vector3,
   Mesh,
 } from '@babylonjs/core'
-import { getSoftDiscTexture } from './Textures'
-import { getQualityProfile } from '../core/DeviceTier'
+import { getSoftDiscTexture } from '@kids/engine'
+import { getQualityProfile } from '@kids/engine'
 
 export class SpeedLines {
   private ps: ParticleSystem
