@@ -278,8 +278,12 @@ Copied by \`scripts/build-kits.mjs\`; the mapping is the SOUNDS table there.
 `)
 }
 
-for (const [name, kit] of Object.entries(KITS)) await buildKit(name, kit)
-await buildCharacters()
+// `node scripts/build-kits.mjs <app> [--no-characters] [--kits=vehicles,nature]`
+const wantChars = !process.argv.includes('--no-characters')
+const kitArg = process.argv.find(a => a.startsWith('--kits='))
+const wantKits = kitArg ? kitArg.slice(7).split(',') : Object.keys(KITS)
+for (const [name, kit] of Object.entries(KITS)) if (wantKits.includes(name)) await buildKit(name, kit)
+if (wantChars) await buildCharacters()
 await buildSounds()
 
 writeFileSync(join(out, 'CREDITS.md'), `# Model kits

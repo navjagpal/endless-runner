@@ -59,6 +59,10 @@ export class AudioManager {
   private _musicGain!:  GainNode
   private _nextBar      = 0
 
+  /** The shared context and master bus, for game-specific synthesised sounds (engines, sirens). */
+  get context(): AudioContext { return this._ctx() }
+  get master(): GainNode { this._ctx(); return this._masterGain }
+
   resume():  void { this._ctx().resume(); void this.preload() }
   suspend(): void { this.ctx?.suspend() }
 
