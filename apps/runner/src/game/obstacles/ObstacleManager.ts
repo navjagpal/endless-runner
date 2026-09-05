@@ -11,11 +11,11 @@ import {
   InstancedMesh,
 } from '@babylonjs/core'
 import { LANE_POSITIONS } from '../track/TrackChunk'
-import { styleChunk } from '../track/ChunkStyling'
-import { getQualityProfile } from '../core/DeviceTier'
-import { getCoinTexture } from '../fx/Textures'
-import { Kits } from '../assets/Kits'
-import { terrainY, terrainSlope } from '../track/Terrain'
+import { styleChunk } from '@kids/engine'
+import { getQualityProfile } from '@kids/engine'
+import { getCoinTexture } from '@kids/engine'
+import { Kits } from '@kids/engine'
+import { terrainY, terrainSlope } from '@kids/engine'
 import { Player, FLY_HEIGHT } from '../player/Player'
 
 const SPAWN_AHEAD    = 70

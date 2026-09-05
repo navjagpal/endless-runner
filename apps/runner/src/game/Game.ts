@@ -1,23 +1,25 @@
 import { Vector3, type Scene } from '@babylonjs/core'
-import { GameEngine }          from './core/GameEngine'
-import { FollowCamera }        from './core/FollowCamera'
-import { setupPostProcessing } from './core/PostProcessing'
-import { setupEnvironment }    from './core/Environment'
+import { GameEngine }          from '@kids/engine'
+import { FollowCamera }        from '@kids/engine'
+import { setupPostProcessing } from '@kids/engine'
+import { setupEnvironment }    from '@kids/engine'
 import { TrackManager }        from './track/TrackManager'
 import { Player }              from './player/Player'
 import { InputHandler }        from './player/InputHandler'
 import { ObstacleManager }     from './obstacles/ObstacleManager'
-import { AudioManager }        from './audio/AudioManager'
+import { AudioManager }        from '@kids/engine'
 import { SpeedLines }          from './fx/SpeedLines'
 import { ZoneManager }         from './zones/ZoneManager'
 import { Backdrop }            from './zones/Backdrop'
-import { CelebrationManager }  from './ui/CelebrationManager'
+import { CelebrationManager }  from '@kids/engine'
 import { HUD }                 from './ui/HUD'
-import { Kits }                from './assets/Kits'
+import { ZONE_MUSIC }          from './audio/music'
+import { MILESTONES }          from './ui/milestones'
+import { Kits }                from '@kids/engine'
 import { Ambient }             from './fx/Ambient'
-import { terrainY }            from './track/Terrain'
-import { curveAt }             from './track/Curve'
-import { CurveState }          from './core/StylePlugin'
+import { terrainY }            from '@kids/engine'
+import { curveAt }             from '@kids/engine'
+import { CurveState }          from '@kids/engine'
 import { CHARACTERS, PETS, loadRoster, saveRoster, type Roster } from './player/Characters'
 import { Pet, type PetKind } from './player/Pet'
 import {
@@ -129,7 +131,7 @@ export class Game {
     this.pet       = new Pet(scene)
     this.pet.setKind(this.roster.pet as PetKind)
     this.camera    = new FollowCamera(scene)
-    this.audio     = new AudioManager()
+    this.audio     = new AudioManager(ZONE_MUSIC)
     this.hud       = new HUD()
     this.backdrop  = new Backdrop(scene)
     this.best      = loadBest()
@@ -224,7 +226,7 @@ export class Game {
         this.zones!.setPipeline(pipeline)
       }
       this.speedLines   = new SpeedLines(scene, this.player.mesh)
-      this.celebrations = new CelebrationManager(scene, this.player.mesh)
+      this.celebrations = new CelebrationManager(scene, this.player.mesh, MILESTONES)
     })
 
     this.ready = true

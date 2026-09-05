@@ -10,10 +10,10 @@ import {
   Vector3,
   Vector4,
 } from '@babylonjs/core'
-import { styleChunk } from '../track/ChunkStyling'
-import { getBuildingTextures } from '../fx/Textures'
-import { getQualityProfile } from '../core/DeviceTier'
-import { Kits } from '../assets/Kits'
+import { styleChunk } from '@kids/engine'
+import { getBuildingTextures } from '@kids/engine'
+import { getQualityProfile } from '@kids/engine'
+import { Kits } from '@kids/engine'
 
 /**
  * Distant scenery — the painted-backdrop layer.

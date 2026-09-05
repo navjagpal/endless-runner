@@ -10,11 +10,11 @@ import {
   Vector4,
   VertexBuffer,
 } from '@babylonjs/core'
-import { styleChunk } from './ChunkStyling'
-import { getQualityProfile } from '../core/DeviceTier'
-import { getAsphaltTexture, getGrassTexture, getBuildingTextures } from '../fx/Textures'
-import { Kits } from '../assets/Kits'
-import { terrainYAt } from './Terrain'
+import { styleChunk } from '@kids/engine'
+import { getQualityProfile } from '@kids/engine'
+import { getAsphaltTexture, getGrassTexture, getBuildingTextures } from '@kids/engine'
+import { Kits } from '@kids/engine'
+import { terrainYAt } from '@kids/engine'
 
 export const LANE_POSITIONS = [-2.5, 0, 2.5]
 export const CHUNK_LENGTH   = 30

@@ -1,5 +1,7 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@kids/engine": ["../../packages/engine/src/index.ts"] },
     "target": "ES2023",
     "useDefineForClassFields": true,
     "module": "ESNext",
@@ -22,5 +24,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src", "../../packages/engine/src"]
 }

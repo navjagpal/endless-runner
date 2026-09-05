@@ -30,7 +30,10 @@ import { dedup, prune, quantize, flatten, join as joinMeshes, mergeDocuments, we
 
 const root  = join(dirname(fileURLToPath(import.meta.url)), '..')
 const cache = join(root, 'node_modules', '.cache', 'kenney')
-const out   = join(root, 'public', 'models', 'kits')
+// Which app receives the assets: `node scripts/build-kits.mjs runner`
+const app   = process.argv[2] || 'runner'
+const pub   = join(root, 'apps', app, 'public')
+const out   = join(pub, 'models', 'kits')
 
 // ─── Sources ─────────────────────────────────────────────────────────────────
 
@@ -238,7 +241,7 @@ async function buildKit(kitName, kit) {
 
 async function buildCharacters() {
   const srcDir = await fetchPack(CHARACTERS.pack)
-  const dir = join(root, 'public', 'models', 'characters')
+  const dir = join(pub, 'models', 'characters')
   mkdirSync(dir, { recursive: true })
   let total = 0
   for (const model of CHARACTERS.models) {
@@ -250,12 +253,12 @@ async function buildCharacters() {
   }
   console.log(`characters: ${CHARACTERS.models.length} files, ${(total / 1024).toFixed(0)} KB total`)
   // The old single-hero file, if present from an earlier build.
-  const legacy = join(root, 'public', 'models', 'runner.glb')
+  const legacy = join(pub, 'models', 'runner.glb')
   if (existsSync(legacy)) rmSync(legacy)
 }
 
 async function buildSounds() {
-  const dir = join(root, 'public', 'audio')
+  const dir = join(pub, 'audio')
   mkdirSync(dir, { recursive: true })
   let total = 0
   for (const [name, [pack, file]] of Object.entries(SOUNDS)) {

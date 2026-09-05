@@ -7,7 +7,7 @@ import {
   Color3,
   Vector3,
 } from '@babylonjs/core'
-import { terrainY } from '../track/Terrain'
+import { terrainY } from '@kids/engine'
 
 /**
  * A pet that runs at the player's heel.

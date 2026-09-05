@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Games</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: linear-gradient(180deg, #2a1d6e 0%, #4c2a9a 60%, #ff8fb1 100%);
+      font-family: 'Fredoka', 'Nunito', 'Arial Rounded MT Bold', Arial, sans-serif; color: #fff; }
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4vh; padding: 4vh 4vw; }
+    h1 { font-size: clamp(2rem, 7vw, 4rem); text-shadow: 0 4px 0 rgba(0,0,0,.25); }
+    .games { display: flex; gap: 4vw; flex-wrap: wrap; justify-content: center; }
+    a.card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2vh;
+      width: min(40vw, 320px); aspect-ratio: 1 / 1; border-radius: 32px; text-decoration: none; color: #fff;
+      font-size: clamp(1.3rem, 4vw, 2.4rem); font-weight: 700; border: 4px solid rgba(255,255,255,.7);
+      box-shadow: 0 10px 0 rgba(0,0,0,.28), 0 20px 40px rgba(0,0,0,.3); transition: transform .08s; }
+    a.card:active { transform: translateY(6px); box-shadow: 0 4px 0 rgba(0,0,0,.28); }
+    a.card span { font-size: clamp(3rem, 12vw, 7rem); line-height: 1; filter: drop-shadow(0 4px 6px rgba(0,0,0,.3)); }
+    .runner { background: linear-gradient(180deg, #ffb347, #ff5fa2); }
+    .vroom  { background: linear-gradient(180deg, #4ade80, #22a5ee); }
+    .soon   { opacity: .55; pointer-events: none; }
+    p { opacity: .8; font-size: clamp(.9rem, 2.5vw, 1.1rem); }
+  </style>
+</head>
+<body>
+  <h1>Pick a game</h1>
+  <div class="games">
+    <a class="card runner" href="runner/"><span>🏃‍♀️</span>Runner</a>
+    <a class="card vroom soon" href="vroom/"><span>🚒</span>Vroom Road</a>
+  </div>
+  <p>Add the game you want to the home screen from inside it.</p>
+  <script>
+    // The old single-game deploy registered a service worker at this root
+    // scope. It would otherwise keep serving the cached old game forever;
+    // unregister it and drop its caches.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(r => { if (r.scope.endsWith('/endless-runner/')) r.unregister() })
+      })
+      if (window.caches) caches.keys().then(keys => keys.forEach(k => { if (k.startsWith('workbox-precache')) caches.delete(k) }))
+    }
+  </script>
+</body>
+</html>

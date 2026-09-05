@@ -7,7 +7,7 @@ import {
   Mesh,
 } from '@babylonjs/core'
 import type { DefaultRenderingPipeline } from '@babylonjs/core'
-import type { SkyDome, CloudLayer } from '../core/Environment'
+import type { SkyDome, CloudLayer } from '@kids/engine'
 import type { Backdrop } from './Backdrop'
 
 // ─── Zone config schema ────────────────────────────────────────────────────────

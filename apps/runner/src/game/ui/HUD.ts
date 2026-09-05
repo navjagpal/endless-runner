@@ -2,7 +2,7 @@ import {
   type GameSettings, type BestRecord, loadSettings, saveSettings, SPEED_MIN, SPEED_MAX,
 } from './Settings'
 import type { CharacterDef, PetDef, Roster } from '../player/Characters'
-import { icon } from './Icons'
+import { icon } from '@kids/engine'
 
 export interface HudExtra {
   multiplier:      number

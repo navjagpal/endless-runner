@@ -1,0 +1,16 @@
+{
+  "name": "@kids/engine",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "peerDependencies": {
+    "@babylonjs/core": "^9.1.0",
+    "@babylonjs/loaders": "^9.1.0",
+    "@babylonjs/materials": "^9.1.0"
+  }
+}

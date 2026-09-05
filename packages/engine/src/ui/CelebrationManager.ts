@@ -5,28 +5,17 @@ import {
   Vector3,
   Mesh,
 } from '@babylonjs/core'
-import type { ZoneConfig } from '../zones/ZoneManager'
 import { getFlareTexture } from '../fx/Textures'
 
 // ─── Milestone list ────────────────────────────────────────────────────────────
 
-interface Milestone {
+export interface Milestone {
   dist: number
   text: string
   sub: string
   emoji: string
   big: boolean       // big = full zone-change style, small = quick pop
 }
-
-const MILESTONES: Milestone[] = [
-  { dist:  100, text: 'Nice!',       sub: '100 metres',  emoji: '🌟', big: false },
-  { dist:  250, text: 'Amazing!',    sub: '250 metres',  emoji: '⭐', big: false },
-  { dist:  750, text: 'Superstar!',  sub: '750 metres',  emoji: '💫', big: false },
-  { dist: 1150, text: 'Incredible!', sub: '1150 metres', emoji: '🎉', big: false },
-  { dist: 2000, text: 'Legendary!',  sub: '2000 metres', emoji: '🏆', big: false },
-  { dist: 3000, text: 'Cosmic!',     sub: '3000 metres', emoji: '🌌', big: false },
-  { dist: 5000, text: 'INFINITE!',   sub: '5000 metres', emoji: '🌈', big: true  },
-]
 
 // ─── Confetti colours ──────────────────────────────────────────────────────────
 
@@ -89,9 +78,12 @@ export class CelebrationManager {
   private nextMilestoneIdx = 0
   private lastTriggerDist  = -1
 
-  constructor(scene: Scene, playerMesh: Mesh) {
+  private milestones: Milestone[]
+
+  constructor(scene: Scene, playerMesh: Mesh, milestones: Milestone[] = []) {
     this.scene   = scene
     this.emitter = playerMesh
+    this.milestones = milestones
     injectCSS()
     this.popEl = this._buildPop()
     this.psSystems = this._buildConfettiSystems()
@@ -121,8 +113,8 @@ export class CelebrationManager {
 
   // Call every frame
   checkMilestone(distance: number): void {
-    if (this.nextMilestoneIdx >= MILESTONES.length) return
-    const m = MILESTONES[this.nextMilestoneIdx]
+    if (this.nextMilestoneIdx >= this.milestones.length) return
+    const m = this.milestones[this.nextMilestoneIdx]
     if (distance >= m.dist && distance !== this.lastTriggerDist) {
       this.lastTriggerDist = distance
       this.nextMilestoneIdx++
@@ -135,7 +127,7 @@ export class CelebrationManager {
    * dodge doesn't want a banner over the road, so it is now the same
    * small pop as everything else plus a little confetti.
    */
-  celebrateZone(zone: ZoneConfig): void {
+  celebrateZone(zone: { label: string; emoji: string }): void {
     this.pop(`${zone.emoji} ${zone.label}!`, '#fff')
     this._fireConfetti(1)
   }

@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
+      - name: Build all games
         run: npm run build
         env:
           NODE_ENV: production

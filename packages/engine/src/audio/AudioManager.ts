@@ -1,13 +1,13 @@
-// ─── Zone music configs ───────────────────────────────────────────────────────
+// ─── Music model ─────────────────────────────────────────────────────────────
 //
-// Each zone is a key, a mode, a four-chord loop and a style. The composer
-// below turns that into bass, chords, an arpeggio, drums and a melody
-// improvised over the chord tones — so the music is different every run
-// but always in key, and each zone has its own feel.
+// A game hands the AudioManager one ZoneMusic per zone: a key, a mode, a
+// four-chord loop and a style. The composer below turns that into bass,
+// chords, an arpeggio, drums and a melody improvised over the chord tones
+// — so the music is different every run but always in key.
 
-type Style = 'pluck' | 'pad' | 'funk' | 'chug' | 'offbeat' | 'arp'
+export type Style = 'pluck' | 'pad' | 'funk' | 'chug' | 'offbeat' | 'arp'
 
-interface ZoneMusic {
+export interface ZoneMusic {
   bpm:   number
   /** Root of the key, Hz (octave 3). */
   root:  number
@@ -16,15 +16,6 @@ interface ZoneMusic {
   chords: number[]
   style: Style
   echo?: boolean
-}
-
-const ZONE_MUSIC: Record<string, ZoneMusic> = {
-  meadow:  { bpm: 132, root: 130.81, mode: 'major', chords: [0, 4, 5, 3], style: 'pluck' },      // C  I V vi IV
-  forest:  { bpm: 108, root: 110.00, mode: 'minor', chords: [0, 5, 2, 6], style: 'pad' },        // Am i VI III VII
-  city:    { bpm: 148, root: 164.81, mode: 'major', chords: [0, 3, 4, 3], style: 'funk' },       // E  I IV V IV
-  railway: { bpm: 140, root: 196.00, mode: 'major', chords: [0, 0, 3, 4], style: 'chug' },       // G  I I IV V
-  beach:   { bpm: 126, root: 146.83, mode: 'major', chords: [0, 3, 0, 4], style: 'offbeat' },    // D  I IV I V
-  space:   { bpm: 120, root: 138.59, mode: 'minor', chords: [0, 5, 3, 4], style: 'arp', echo: true }, // C#m i VI iv v
 }
 
 const SCALES = {
@@ -36,17 +27,31 @@ const semi = (root: number, n: number) => root * Math.pow(2, n / 12)
 
 // ─── AudioManager ─────────────────────────────────────────────────────────────
 
-/** Files under public/audio/, copied from Kenney's CC0 packs by scripts/build-kits.mjs. */
-const SAMPLES = [
+/** Sample files a game ships under public/audio/<name>.ogg. */
+export const DEFAULT_SAMPLES = [
   'coin', 'jump', 'bump', 'spill', 'star', 'magnet', 'streak', 'whee', 'best', 'zone',
   'starJingle', 'click', 'select', 'locked', 'land', 'step',
-] as const
-type SampleName = typeof SAMPLES[number]
+]
+type SampleName = string
 
 export class AudioManager {
   private ctx: AudioContext | null = null
   private buffers = new Map<SampleName, AudioBuffer>()
   private preloaded = false
+  private music: Record<string, ZoneMusic>
+  private samples: string[]
+
+  /**
+   * @param music   one ZoneMusic per zone id; the first key is the default
+   * @param samples names of the .ogg files under public/audio/ to preload
+   */
+  constructor(music: Record<string, ZoneMusic>, samples: string[] = DEFAULT_SAMPLES) {
+    this.music   = music
+    this.samples = samples
+    const first  = Object.keys(music)[0] ?? 'meadow'
+    this._currentZone = first
+    this._targetZone  = first
+  }
   private _musicRunning = false
   private _currentZone  = 'meadow'
   private _targetZone   = 'meadow'
@@ -66,7 +71,7 @@ export class AudioManager {
     if (this.preloaded) return
     this.preloaded = true
     const ctx = this._ctx()
-    await Promise.all(SAMPLES.map(async name => {
+    await Promise.all(this.samples.map(async name => {
       try {
         const res = await fetch(`${import.meta.env.BASE_URL}audio/${name}.ogg`)
         if (!res.ok) return
@@ -311,7 +316,7 @@ export class AudioManager {
   }
 
   private _beatDuration(): number {
-    const zm = ZONE_MUSIC[this._currentZone] ?? ZONE_MUSIC['meadow']
+    const zm = this.music[this._currentZone] ?? this.music[Object.keys(this.music)[0]]
     return 60 / zm.bpm
   }
 
@@ -326,7 +331,7 @@ export class AudioManager {
     this._currentZone = this._targetZone
     if (zoneChanged) this._phrase = []
 
-    const zm    = ZONE_MUSIC[this._currentZone] ?? ZONE_MUSIC['meadow']
+    const zm    = this.music[this._currentZone] ?? this.music[Object.keys(this.music)[0]]
     const beat  = 60 / zm.bpm
     const t0    = this._nextBar
     const bar   = this._bar++
