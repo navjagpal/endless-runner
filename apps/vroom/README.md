@@ -20,9 +20,10 @@ lanes, jump off everything, honk. Nothing can end the run.
   works too.
 - **Puddles** splash, **car washes** bubble and pay coins.
 - **Worlds** loop forever: countryside → city → beach → mountains.
-- **Coins** only ever go up. They buy vehicles in the garage on the start
-  screen (race car, police car, fire truck, monster truck, motorcycle,
-  ambulance, taxi, sports car).
+- **Coins** only ever go up; they're a number to be proud of, not a currency.
+  Every vehicle in the garage (race car, police car, fire truck, monster
+  truck, motorcycle, ambulance, taxi, sports car) is available from the
+  start — flip through them on the start screen.
 
 ## Tech
 
