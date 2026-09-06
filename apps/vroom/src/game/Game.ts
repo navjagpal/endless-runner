@@ -9,6 +9,7 @@ import { TrafficManager } from './Traffic'
 import { ZoneManager } from './Zones'
 import { Backdrop } from './Backdrop'
 import { HUD } from './HUD'
+import { InputHandler, type InputAction } from './Input'
 import { ZONE_MUSIC } from './music'
 import { VEHICLES, loadGarage, saveGarage, loadBest, saveBest, type GarageState, type VehicleDef } from './Garage'
 
@@ -85,24 +86,18 @@ export class Game {
     this.hud.onPause = () => this._pause()
     this.hud.onResume = () => this._resume()
     this.hud.onHome = () => { this._save(); location.reload() }
-    this.hud.onJump = () => this._jump()
-    this.hud.onAction = () => { if (this.running && !this.paused) this.vehicle.action() }
     this.camera.setShowcase(true)
 
-    // Steering: tap either half of the screen. Keyboard for the desk.
-    canvas.addEventListener('pointerdown', (e) => {
+    // Same gestures as the runner; the on-screen pad routes through the same handler.
+    const act = (a: InputAction) => {
       if (!this.running || this.paused) return
-      if (e.clientX < window.innerWidth / 2) this.vehicle.steerLeft(); else this.vehicle.steerRight()
-    })
-    window.addEventListener('keydown', (e) => {
-      if (!this.running || this.paused) return
-      switch (e.code) {
-        case 'ArrowLeft': case 'KeyA': this.vehicle.steerLeft(); break
-        case 'ArrowRight': case 'KeyD': this.vehicle.steerRight(); break
-        case 'ArrowUp': case 'Space': case 'KeyW': this._jump(); break
-        case 'ArrowDown': case 'KeyS': case 'Enter': case 'KeyH': this.vehicle.action(); break
-      }
-    })
+      if (a === 'left') this.vehicle.steerLeft()
+      else if (a === 'right') this.vehicle.steerRight()
+      else if (a === 'jump') this._jump()
+      else this.vehicle.action()
+    }
+    new InputHandler(canvas, act)
+    this.hud.onInput = act
     document.addEventListener('visibilitychange', () => { if (document.hidden) { this._save(); this._pause() } })
 
     this.hud.showStart(this.best)

@@ -9,9 +9,12 @@ lanes, jump off everything, honk. Nothing can end the run.
 
 | Do | How |
 |----|-----|
-| Steer | Tap the left or right half of the screen (`←` `→` on a keyboard) |
-| Jump | The big green **JUMP** button (`Space` / `↑`) — a hop; ramps launch you properly |
-| Action | The big pink button (`Enter` / `↓`): siren on the police car, fire truck and ambulance; horn on the cars; wheelie on the motorcycle; bounce on the monster truck |
+| Steer | Swipe left or right (`←` `→` on a keyboard) |
+| Jump | Tap, or swipe up (`Space` / `↑`) — a hop; ramps launch you properly |
+| Action | Swipe down (`Enter` / `↓`): siren on the police car, fire truck and ambulance; horn on the cars; wheelie on the motorcycle; bounce on the monster truck |
+
+The same controls as the runner. On touch devices the big arrow pad
+(left, right, jump, action) shows by default; the pause menu toggles it.
 
 - **Ramps** every hundred metres or so, with a coin arc over each. Hang time
   is shown while airborne; a long flight earns "Big air!" and bonus coins.

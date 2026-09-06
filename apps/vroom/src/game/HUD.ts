@@ -1,13 +1,19 @@
 import { icon } from '@kids/engine'
 import type { VehicleDef, GarageState } from './Garage'
+import type { InputAction } from './Input'
 
 /**
- * A HUD for a four-year-old: two numbers at the top, a big JUMP button,
- * a big ACTION button, and nothing else during play. Steering is tapping
- * either side of the screen (handled on the canvas by Game).
+ * A HUD for a four-year-old: two numbers at the top and, on touch
+ * devices, the same big arrow pad his sister's game has (left, right,
+ * jump, and the vehicle's action in place of slide). Swipes and taps on
+ * the canvas do the same things; the pad can be hidden from the pause menu.
  */
 
 const FONT = `'Fredoka','Nunito','Arial Rounded MT Bold','Segoe UI Rounded',Arial,sans-serif`
+
+function _hasTouch(): boolean {
+  try { return 'ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0 } catch { return false }
+}
 
 let _css = false
 function injectCSS(): void {
@@ -31,8 +37,11 @@ export class HUD {
   private distEl: HTMLSpanElement
   private coinsEl: HTMLSpanElement
   private pauseBtn: HTMLButtonElement
-  private jumpBtn: HTMLButtonElement
-  private actionBtn: HTMLButtonElement
+  private touchPad: HTMLDivElement
+  private actionPadBtn!: HTMLDivElement
+  private padToggle!: HTMLButtonElement
+  private padVisible = _hasTouch()
+  private playing = false
   private airEl: HTMLDivElement
   private startScreen: HTMLDivElement
   private pauseScreen: HTMLDivElement
@@ -50,8 +59,7 @@ export class HUD {
   onPause?: () => void
   onResume?: () => void
   onHome?: () => void
-  onJump?: () => void
-  onAction?: () => void
+  onInput?: (a: InputAction) => void
   onVehicleChange?: (id: string) => void
 
   constructor() {
@@ -95,12 +103,10 @@ export class HUD {
     `
     this.container.appendChild(this.airEl)
 
-    // Big buttons
-    this.jumpBtn = this._bigBtn(`${icon('arrowU', '1.1em')}<div style="font-size:0.45em;letter-spacing:2px">JUMP</div>`, 'right:4vw;bottom:5vh;', 'linear-gradient(180deg,#4ade80,#16a34a)')
-    this.jumpBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.onJump?.() })
-    this.actionBtn = this._bigBtn('📣', 'left:4vw;bottom:5vh;', 'linear-gradient(180deg,#f472b6,#db2777)')
-    this.actionBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.onAction?.() })
-    this.container.append(this.jumpBtn, this.actionBtn)
+    // Optional arrow pad, like the runner's
+    this.touchPad = this._buildTouchPad()
+    this.container.appendChild(this.touchPad)
+    try { const v = localStorage.getItem('vroom_buttons'); if (v === '0') this.padVisible = false; if (v === '1') this.padVisible = true } catch { /* ignore */ }
 
     this.startScreen = this._buildStart()
     this.pauseScreen = this._buildPause()
@@ -125,8 +131,13 @@ export class HUD {
     this.startScreen.style.display = 'none'
     this.topBar.style.display = 'flex'
     this.pauseBtn.style.display = 'flex'
-    this.jumpBtn.style.display = 'flex'
-    this.actionBtn.style.display = 'flex'
+    this.playing = true
+    this._applyPad()
+  }
+
+  private _applyPad(): void {
+    this.touchPad.style.display = this.padVisible && this.playing ? 'flex' : 'none'
+    this.padToggle.innerHTML = this.padVisible ? '👍 Big buttons: On' : '🙈 Big buttons: Off'
   }
   showPause(): void { this.pauseScreen.style.display = 'flex' }
   hidePause(): void { this.pauseScreen.style.display = 'none' }
@@ -137,9 +148,36 @@ export class HUD {
     this.playBtn.style.opacity = ready ? '1' : '0.7'
   }
 
-  /** Label the action button for the current vehicle. */
+  /** Label the action pad button for the current vehicle. */
   setAction(kind: string): void {
-    this.actionBtn.innerHTML = { siren: '🚨', horn: '📣', wheelie: '🏍️', bounce: '🦘' }[kind] ?? '📣'
+    this.actionPadBtn.innerHTML = { siren: '🚨', horn: '📣', wheelie: '🏍️', bounce: '🦘' }[kind] ?? '📣'
+  }
+
+  private _buildTouchPad(): HTMLDivElement {
+    const pad = document.createElement('div')
+    pad.style.cssText = `position:absolute;left:0;right:0;bottom:0;height:38%;display:none;justify-content:space-between;align-items:flex-end;padding:0 4vw 6vh;pointer-events:none;`
+    const mk = (html: string, action: InputAction) => {
+      const b = document.createElement('div')
+      b.style.cssText = `
+        width:min(18vw,110px);height:min(18vw,110px);border-radius:50%;background:rgba(255,255,255,0.22);
+        border:3px solid rgba(255,255,255,0.65);display:flex;align-items:center;justify-content:center;
+        font-size:min(9vw,52px);color:#fff;pointer-events:all;box-shadow:0 6px 18px rgba(0,0,0,0.25), inset 0 2px 0 rgba(255,255,255,0.4);
+        backdrop-filter:blur(6px);touch-action:none;-webkit-tap-highlight-color:transparent;transition:transform 0.08s;
+      `
+      b.innerHTML = html
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); b.style.transform = 'scale(0.9)'; this.onInput?.(action) })
+      b.addEventListener('pointerup', () => { b.style.transform = 'scale(1)' })
+      b.addEventListener('pointerleave', () => { b.style.transform = 'scale(1)' })
+      return b
+    }
+    const left = document.createElement('div'); left.style.cssText = 'display:flex;gap:min(3vw,18px);align-items:flex-end;'
+    left.append(mk(icon('arrowL', '0.9em'), 'left'), mk(icon('arrowR', '0.9em'), 'right'))
+    const right = document.createElement('div'); right.style.cssText = 'display:flex;flex-direction:column;gap:min(2.5vw,14px);align-items:center;'
+    this.actionPadBtn = mk('📣', 'action')
+    this.actionPadBtn.style.fontSize = 'min(7vw,40px)'
+    right.append(mk(icon('arrowU', '0.9em'), 'jump'), this.actionPadBtn)
+    pad.append(left, right)
+    return pad
   }
 
   setGarage(vehicles: VehicleDef[], garage: GarageState): void {
@@ -200,7 +238,7 @@ export class HUD {
     title.textContent = '🚒 Vroom Road'
     const sub = document.createElement('div')
     sub.style.cssText = 'color:rgba(255,255,255,0.9);font-size:clamp(0.95rem,3vw,1.3rem);font-weight:700;text-align:center;'
-    sub.textContent = 'Tap left or right to steer · JUMP over everything · Honk!'
+    sub.textContent = 'Swipe ◀ ▶ to steer · Tap or swipe ▲ to jump · Swipe ▼ to honk!'
     const top = document.createElement('div'); top.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;'
     top.append(title, sub)
 
@@ -262,7 +300,14 @@ export class HUD {
     const home = this._actionBtn(`${icon('home', '1.1em')} Garage`, 'linear-gradient(180deg,#f472b6,#fb923c)')
     home.style.fontSize = 'clamp(0.95rem,2.5vw,1.3rem)'; home.style.padding = '12px 44px'
     home.addEventListener('pointerup', () => this.onHome?.())
-    screen.append(title, resume, home)
+    this.padToggle = this._actionBtn('👍 Big buttons: On', 'linear-gradient(180deg,#818cf8,#6366f1)')
+    this.padToggle.style.fontSize = 'clamp(0.95rem,2.5vw,1.3rem)'; this.padToggle.style.padding = '12px 44px'
+    this.padToggle.addEventListener('pointerup', () => {
+      this.padVisible = !this.padVisible
+      try { localStorage.setItem('vroom_buttons', this.padVisible ? '1' : '0') } catch { /* ignore */ }
+      this._applyPad()
+    })
+    screen.append(title, resume, this.padToggle, home)
     return screen
   }
 
@@ -271,19 +316,6 @@ export class HUD {
     b.className = 'vb'
     b.style.cssText = `position:absolute;${css}width:50px;height:50px;border-radius:50%;cursor:pointer;background:rgba(255,255,255,0.18);backdrop-filter:blur(8px);border:2px solid rgba(255,255,255,0.45);box-shadow:0 4px 0 rgba(0,0,0,0.25);align-items:center;justify-content:center;pointer-events:all;`
     b.innerHTML = svg
-    return b
-  }
-
-  private _bigBtn(html: string, css: string, bg: string): HTMLButtonElement {
-    const b = document.createElement('button')
-    b.className = 'vb'
-    b.style.cssText = `
-      position:absolute;${css}display:none;flex-direction:column;align-items:center;justify-content:center;
-      width:min(24vw,150px);height:min(24vw,150px);border-radius:50%;cursor:pointer;background:${bg};
-      border:4px solid rgba(255,255,255,0.75);color:#fff;font-family:inherit;font-size:min(10vw,3.4rem);font-weight:700;
-      box-shadow:0 8px 0 rgba(0,0,0,0.3),0 14px 30px rgba(0,0,0,0.3);pointer-events:all;touch-action:none;transition:transform 0.08s;
-    `
-    b.innerHTML = html
     return b
   }
 
